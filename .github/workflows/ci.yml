@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    name: Tests d'installation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: tests/smoke.sh
+
+  reproducible:
+    name: dist/ correspond à GSTACK_REF
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: ./build.sh
+      - name: Aucun écart entre dist/ et la régénération
+        run: |
+          git status --porcelain -- dist
+          test -z "$(git status --porcelain -- dist)"

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "bash .github/skills/gstack/copilot/hook-adapter.sh",
+        "cwd": ".",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}

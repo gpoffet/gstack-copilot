@@ -1,0 +1,6 @@
+# Clone de GStack utilisé par build.sh
+.build/
+# Fichiers temporaires de l'assembleur
+.assemble-meta.json
+.assemble-out/
+__pycache__/

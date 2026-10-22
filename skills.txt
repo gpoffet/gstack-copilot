@@ -1,0 +1,48 @@
+# Skills GStack installés par gstack-copilot (un par ligne, sans le préfixe gstack-).
+# Après modification : ./build.sh puis réinstaller dans les projets.
+#
+# Exclus volontairement :
+#   browse, qa, design-review, design-consultation, design-shotgun, design-html,
+#   canary, benchmark, scrape, pair-agent, open-gstack-browser, setup-browser-cookies,
+#   skillify, devex-review, land-and-deploy, make-pdf, diagram : navigateur, design ou PDF compilés
+#   cso : helper natif + Docker, son modèle de confiance refuse un lanceur venant du dépôt
+#   codex, claude-code, benchmark-models : revues externes via d'autres CLI
+#   setup-gbrain, sync-gbrain : mémoire GBrain
+#   ios-* : outillage Xcode
+#   gstack-upgrade : la mise à jour passe par gstack-copilot (build.sh + install.sh)
+#   eval-plan, landing-report, setup-deploy : outillage interne à GStack ou à Conductor
+
+# Cadrage et planification
+office-hours
+spec
+autoplan
+plan-ceo-review
+plan-eng-review
+plan-design-review
+plan-devex-review
+plan-tune
+
+# Construction et revue
+review
+investigate
+health
+test-audit
+qa-only
+deslop-shared-libs
+
+# Livraison et documentation
+ship
+document-generate
+document-release
+retro
+learn
+
+# Continuité de session
+context-save
+context-restore
+
+# Garde-fous
+careful
+freeze
+guard
+unfreeze
