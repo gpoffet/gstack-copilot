@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Pont entre les hooks preToolUse de Copilot et les scripts de garde de GStack.
+"""Bridge between Copilot preToolUse hooks and GStack's safety scripts.
 
-Lit l'événement sur stdin, au format Copilot ({toolName, toolArgs}) ou au format
-compatible snake_case ({tool_name, tool_input}, harness Local et alias
-PreToolUse), le transmet aux scripts amont careful/bin/check-careful.sh et
-freeze/bin/check-freeze.sh au format Claude Code, puis renvoie la décision au
-format Copilot (permissionDecision au premier niveau) en gardant aussi
-l'enveloppe hookSpecificOutput lue par le harness Local.
+Reads the event on stdin, in Copilot's format ({toolName, toolArgs}) or in the
+compatible snake_case format ({tool_name, tool_input}: VS Code's Local harness
+and the PreToolUse alias), forwards it to the upstream careful/bin/check-careful.sh
+and freeze/bin/check-freeze.sh scripts in Claude Code's format, then returns the
+decision in Copilot's format (top-level permissionDecision), keeping the
+hookSpecificOutput envelope the Local harness reads.
 
-Toute erreur vaut "pas de décision" ({}) : le wrapper bash ne doit jamais échouer.
+Any error means "no decision" ({}): the bash wrapper must never fail.
 """
 import json
 import os

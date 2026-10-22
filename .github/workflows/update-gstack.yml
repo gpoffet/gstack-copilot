@@ -1,0 +1,60 @@
+name: Track GStack
+
+# Once a week, rebuilds dist/ from GStack's latest main commit and opens a pull
+# request when it changed. Needs "Allow GitHub Actions to create and approve
+# pull requests" (Settings > Actions > General > Workflow permissions).
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Latest GStack commit
+        id: upstream
+        run: |
+          sha="$(git ls-remote https://github.com/garrytan/gstack refs/heads/main | cut -f1)"
+          [ -n "$sha" ] || { echo "::error::could not read GStack's main branch"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ "$sha" = "$(tr -d '[:space:]' < GSTACK_REF)" ]; then
+            echo "Already on $sha"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebuild and test
+        if: steps.upstream.outputs.changed == 'true'
+        run: |
+          echo "${{ steps.upstream.outputs.sha }}" > GSTACK_REF
+          ./build.sh
+          tests/smoke.sh
+
+      - name: Open a pull request
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$(cat dist/.github/skills/gstack/VERSION)"
+          branch="update-gstack/$v"
+          if git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null; then
+            echo "Branch $branch already exists"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add GSTACK_REF dist
+          git commit -m "chore: GStack $v"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" --title "GStack $v" --body \
+            "Rebuilds dist/ from GStack ${{ steps.upstream.outputs.sha }}. build.sh and tests/smoke.sh passed in this workflow (pull requests opened by GitHub Actions do not trigger CI on their own). After merging, tag the release: \`git tag v$v-1 && git push origin v$v-1\`."

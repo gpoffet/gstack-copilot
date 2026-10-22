@@ -1,18 +1,20 @@
-# Skills GStack installés par gstack-copilot (un par ligne, sans le préfixe gstack-).
-# Après modification : ./build.sh puis réinstaller dans les projets.
+# GStack skills installed by gstack-copilot (one per line, without the gstack- prefix).
+# After editing: ./build.sh, tests/smoke.sh, then reinstall in your projects.
 #
-# Exclus volontairement :
+# Left out on purpose:
 #   browse, qa, design-review, design-consultation, design-shotgun, design-html,
 #   canary, benchmark, scrape, pair-agent, open-gstack-browser, setup-browser-cookies,
-#   skillify, devex-review, land-and-deploy, make-pdf, diagram : navigateur, design ou PDF compilés
-#   cso : helper natif + Docker, son modèle de confiance refuse un lanceur venant du dépôt
-#   codex, claude-code, benchmark-models : revues externes via d'autres CLI
-#   setup-gbrain, sync-gbrain : mémoire GBrain
-#   ios-* : outillage Xcode
-#   gstack-upgrade : la mise à jour passe par gstack-copilot (build.sh + install.sh)
-#   eval-plan, landing-report, setup-deploy : outillage interne à GStack ou à Conductor
+#   skillify, devex-review, land-and-deploy, make-pdf, diagram: need GStack's compiled
+#     browser, design or PDF binaries
+#   cso: needs a native launcher and Docker, and its trust model rejects a launcher
+#     shipped inside the repository it audits
+#   codex, claude-code, benchmark-models: outside reviews through other CLIs
+#   setup-gbrain, sync-gbrain: GBrain memory
+#   ios-*: Xcode tooling
+#   gstack-upgrade: updates go through gstack-copilot releases instead
+#   eval-plan, landing-report, setup-deploy: tooling internal to GStack or Conductor
 
-# Cadrage et planification
+# Think and plan
 office-hours
 spec
 autoplan
@@ -22,7 +24,7 @@ plan-design-review
 plan-devex-review
 plan-tune
 
-# Construction et revue
+# Build and review
 review
 investigate
 health
@@ -30,18 +32,18 @@ test-audit
 qa-only
 deslop-shared-libs
 
-# Livraison et documentation
+# Ship and document
 ship
 document-generate
 document-release
 retro
 learn
 
-# Continuité de session
+# Session continuity
 context-save
 context-restore
 
-# Garde-fous
+# Safety
 careful
 freeze
 guard

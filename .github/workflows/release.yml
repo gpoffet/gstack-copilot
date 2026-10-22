@@ -1,0 +1,51 @@
+name: Release
+
+# Push a tag named v<GStack version>-<n>, for example v1.91.176.0-1, to publish
+# the archive that get.sh downloads.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Tag matches the GStack version in dist/
+        run: |
+          v="$(cat dist/.github/skills/gstack/VERSION)"
+          case "$GITHUB_REF_NAME" in
+            "v$v-"[0-9]*) ;;
+            *) echo "::error::tag $GITHUB_REF_NAME should be v$v-<n> (dist/ holds GStack $v)"; exit 1 ;;
+          esac
+
+      - name: Tests
+        run: tests/smoke.sh
+
+      - name: Package
+        run: scripts/package.sh out
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - > notes.md <<'EOF'
+          import json
+          m = json.load(open("dist/.github/skills/gstack/.gstack-copilot.json"))
+          skills = ", ".join(f"`/{s}`" for s in m["skills"])
+          print(f"GStack {m['gstack_version']} "
+                f"([{m['gstack_commit']}](https://github.com/garrytan/gstack/commit/{m['gstack_commit']})), "
+                f"{len(m['skills'])} skills.\n")
+          print("Install or update, from the root of your project:\n")
+          print("```bash\ncurl -fsSL https://raw.githubusercontent.com/gpoffet/gstack-copilot/main/get.sh | bash\n```\n")
+          print(f"Skills: {skills}")
+          EOF
+          gh release create "$GITHUB_REF_NAME" out/gstack-copilot.tar.gz out/gstack-copilot.tar.gz.sha256 \
+            --title "gstack-copilot $GITHUB_REF_NAME" --notes-file notes.md

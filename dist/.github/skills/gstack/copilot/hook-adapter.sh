@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Hook preToolUse de gstack-copilot (déclaré dans .github/hooks/gstack-safety.json).
+# gstack-copilot preToolUse hook (declared in .github/hooks/gstack-safety.json).
 #
-# Applique /careful et /freeze sous Copilot, qui ignore les hooks déclarés dans
-# un skill. Toujours exit 0 et toujours un objet JSON sur stdout : dans le
-# harness Copilot, un hook preToolUse en échec refuse l'outil.
+# Enforces /careful and /freeze under Copilot, which ignores hooks declared in a
+# skill. Always exits 0 and always prints one JSON object: in the Copilot
+# harness, a failing preToolUse hook denies the tool.
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${DIR%/copilot}"
 
-# Chemin rapide, appelé à chaque outil : sans drapeau careful ni frontière
-# freeze, aucune décision et aucun processus Python.
+# Fast path, run on every tool call: with no careful flag and no freeze
+# boundary there is nothing to decide, and no Python process is started.
 STATE=""
 if . "$ROOT/bin/gstack-state-root.sh" 2>/dev/null && command -v gstack_state_root >/dev/null 2>&1; then
   STATE="$(gstack_state_root 2>/dev/null; printf x)"; STATE="${STATE%x}"

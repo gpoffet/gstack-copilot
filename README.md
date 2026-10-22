@@ -1,186 +1,192 @@
 # gstack-copilot
 
-Installe [GStack](https://github.com/garrytan/gstack) dans un projet pour
-**GitHub Copilot** : VS Code avec le harness Copilot, Copilot CLI et l'app
-GitHub Copilot, qui partagent le même runtime.
+[GStack](https://github.com/garrytan/gstack) skills for **GitHub Copilot**,
+installed per project: VS Code with the Copilot harness, Copilot CLI and the
+GitHub Copilot app all pick them up.
 
-GStack fournit des skills qui couvrent un cycle complet : cadrage produit,
-revue de plan, revue de code, livraison, rétrospective. Son installeur officiel
-vise une installation par utilisateur (`~/.copilot/skills`) et nécessite le
-clone complet de GStack. gstack-copilot en fait une **installation par projet**,
-versionnée avec le code, sans dépendre d'un clone de GStack sur la machine.
-
-## Ce que fait le dépôt
-
-* `build.sh` récupère GStack au commit épinglé dans `GSTACK_REF`, lance son
-  générateur officiel pour Copilot (`gen:skill-docs --host copilot`), puis
-  `scripts/assemble.py` produit `dist/` :
-  * les skills sélectionnés dans `skills.txt`, nommés `gstack-<skill>` ;
-  * le runtime de GStack (`bin/`, `lib/`, références) dans `.github/skills/gstack/` ;
-  * un hook Copilot qui applique `/gstack-careful` et `/gstack-freeze` ;
-  * la section à insérer dans `AGENTS.md`.
-* `install.sh` copie `dist/` dans un projet, sans aucune réécriture à
-  l'installation. Il sait mettre à jour, désinstaller et migrer l'ancien portage.
-* `tests/smoke.sh` installe dans un dépôt jetable et vérifie les binaires, les
-  préambules des skills, le hook et la désinstallation. La CI le lance, et
-  vérifie aussi que `dist/` correspond exactement à `GSTACK_REF`.
-
-`dist/` est committé : installer dans un projet ne demande ni Bun pour générer,
-ni accès à GitHub.
-
-## Prérequis
-
-Sur la machine qui utilise les skills :
-
-* Linux, macOS ou WSL, avec `bash`, `git` et `python3` ;
-* **[Bun](https://bun.sh) 1.4.2 ou plus récent** : les outils de GStack sont
-  écrits en TypeScript et l'appellent. `install.sh` propose de l'installer
-  pour l'utilisateur courant, sans droits administrateur ;
-* VS Code avec GitHub Copilot, en choisissant **Copilot** comme Session Target
-  (ou Copilot CLI).
-
-Windows natif n'est pas pris en charge : le hook de sécurité et les skills
-reposent sur bash.
-
-## Installer dans un projet
+*[Version française](README.fr.md)*
 
 ```bash
-git clone https://github.com/gpoffet/gstack-copilot ~/gstack-copilot
-cd ~/projets/mon-projet
-~/gstack-copilot/install.sh
-git add .github AGENTS.md && git commit -m "chore: install gstack-copilot"
+# from the root of your project
+curl -fsSL https://raw.githubusercontent.com/gpoffet/gstack-copilot/main/get.sh | bash
 ```
 
-Le projet reçoit :
+Then open the Copilot chat and type `/gstack-office-hours`.
 
-| Chemin | Contenu |
+> gstack-copilot is an independent community port. It is not affiliated with
+> or endorsed by GStack, Garry Tan, GitHub or Microsoft. GStack is the work of
+> Garry Tan and its contributors; this repository only repackages it for
+> Copilot.
+
+## What you get
+
+GStack is a set of skills that walk an AI agent through a full development
+cycle: product framing, plan reviews, code review, shipping, retrospectives.
+Its official installer targets a per-user setup and needs a full GStack clone.
+gstack-copilot turns it into a **per-project install**, versioned with your
+code, so everyone on the team gets the same skills without installing GStack.
+
+| Step | Skills |
 |---|---|
-| `.github/skills/gstack-*/` | les skills, un dossier par skill |
-| `.github/skills/gstack/` | le runtime : routeur `/gstack`, binaires, bibliothèques, références |
-| `.github/hooks/gstack-safety.json` | le hook `preToolUse` de `/gstack-careful` et `/gstack-freeze` |
-| `AGENTS.md` | une section délimitée par des marqueurs, avec la boucle de travail et le routage |
+| Think | `/gstack-office-hours`, `/gstack-spec` |
+| Review the plan | `/gstack-plan-ceo-review`, `/gstack-plan-eng-review`, `/gstack-plan-design-review`, `/gstack-plan-devex-review`, `/gstack-autoplan` (every review in a row), `/gstack-plan-tune` |
+| Build and check | `/gstack-review`, `/gstack-investigate`, `/gstack-health`, `/gstack-test-audit`, `/gstack-qa-only`, `/gstack-deslop-shared-libs` |
+| Ship and document | `/gstack-ship`, `/gstack-document-generate`, `/gstack-document-release`, `/gstack-retro`, `/gstack-learn` |
+| Resume work | `/gstack-context-save`, `/gstack-context-restore` |
+| Safety | `/gstack-careful`, `/gstack-freeze`, `/gstack-guard`, `/gstack-unfreeze` |
 
-L'état utilisateur de GStack (configuration, apprentissages, journaux) reste
-dans `~/.gstack/`, hors du dépôt.
+`/gstack` routes to the right skill when in doubt. Skills carry the `gstack-`
+prefix because `/review` is a Copilot built-in, and because VS Code requires a
+skill's name to match its folder.
 
-Options : `--yes` pour ne poser aucune question, `--no-hooks` pour ne pas
-installer le hook, `--force` pour remplacer un dossier `gstack-*` qui ne vient
-pas de gstack-copilot, `--uninstall` pour tout retirer.
+## Requirements
 
-## Utiliser les skills
+* Linux, macOS or WSL, with `bash`, `git`, `curl` and `python3`.
+* **[Bun](https://bun.sh) 1.4.2 or later.** GStack's tools are written in
+  TypeScript and run on Bun. The installer offers to install it for the current
+  user, without admin rights.
+* VS Code with GitHub Copilot, with **Copilot** selected as the Session Target
+  (or Copilot CLI).
 
-Dans le chat, tape `/gstack-` pour voir la liste. Les skills portent le préfixe
-`gstack-` parce que `/review` est une commande native de Copilot, et parce que
-VS Code exige que le nom d'un skill soit celui de son dossier.
+Native Windows is not supported: the skills and the safety hook rely on bash.
 
-| Étape | Skills |
+## Install, update, uninstall
+
+All commands run from the root of the project.
+
+| Action | Command |
 |---|---|
-| Cadrer | `/gstack-office-hours`, `/gstack-spec` |
-| Revoir le plan | `/gstack-plan-ceo-review`, `/gstack-plan-eng-review`, `/gstack-plan-design-review`, `/gstack-plan-devex-review`, `/gstack-autoplan` (toutes les revues à la suite), `/gstack-plan-tune` |
-| Construire et vérifier | `/gstack-review`, `/gstack-investigate`, `/gstack-health`, `/gstack-test-audit`, `/gstack-qa-only`, `/gstack-deslop-shared-libs` |
-| Livrer et documenter | `/gstack-ship`, `/gstack-document-generate`, `/gstack-document-release`, `/gstack-retro`, `/gstack-learn` |
-| Reprendre une session | `/gstack-context-save`, `/gstack-context-restore` |
-| Garde-fous | `/gstack-careful`, `/gstack-freeze`, `/gstack-guard`, `/gstack-unfreeze` |
+| Install or update | `curl -fsSL https://raw.githubusercontent.com/gpoffet/gstack-copilot/main/get.sh \| bash` |
+| Pin a release | `curl -fsSL .../get.sh \| GSTACK_COPILOT_VERSION=v1.91.176.0-1 bash` |
+| No questions | `curl -fsSL .../get.sh \| bash -s -- --yes` |
+| Without the safety hook | `curl -fsSL .../get.sh \| bash -s -- --no-hooks` |
+| Uninstall | `curl -fsSL .../get.sh \| bash -s -- --uninstall` |
 
-`/gstack` aiguille vers le bon skill en cas de doute.
-
-### Harness Copilot ou Local
-
-VS Code propose deux moteurs pour son agent intégré. **Copilot** (recommandé)
-partage son runtime avec Copilot CLI : ce sont ses noms d'outils (`ask_user`,
-`task`, `view`) que le générateur de GStack utilise, et c'est son format de
-hooks que gstack-copilot installe. **Local**, l'ancien moteur, fonctionne aussi
-pour les skills : la section d'`AGENTS.md` donne la correspondance de ses noms
-d'outils. Le hook est écrit pour accepter les deux formats d'événement, mais il
-n'a été vérifié qu'avec des événements simulés : voir « Limites connues ».
-
-## Garde-fous : /gstack-careful et /gstack-freeze
-
-Copilot ignore les hooks déclarés dans un skill. gstack-copilot installe donc
-un hook de dépôt, `.github/hooks/gstack-safety.json`, qui appelle les scripts
-de contrôle d'origine de GStack.
-
-* Sans `/gstack-careful` ni `/gstack-freeze` actifs, le hook ne décide rien et
-  ne lance aucun processus Python.
-* `/gstack-careful` pose un drapeau valable 12 heures. Tant qu'il existe, les
-  commandes destructrices sont soumises à confirmation (`git reset --hard`,
-  `git push --force`, `DROP TABLE`...) ou refusées (`rm -rf /`, `rm -rf ~`).
-* `/gstack-freeze <dossier>` refuse les modifications de fichiers hors du
-  dossier choisi (outils d'édition, de création et de patch). Les commandes
-  terminal ne sont pas contrôlées sur ce point.
-* `/gstack-unfreeze` lève la frontière, et retire aussi le drapeau careful si on
-  le lui demande.
-* Le hook ne bloque jamais par erreur : s'il plante, il répond « pas de
-  décision », car Copilot refuse l'outil quand un hook `preToolUse` échoue.
-
-## Mettre à jour
-
-GStack publie plusieurs versions par jour. Pour suivre une nouvelle version :
+`get.sh` downloads the latest [release](https://github.com/gpoffet/gstack-copilot/releases),
+checks it against its published SHA-256, and runs `install.sh`. Prefer to read
+before running? Download it first:
 
 ```bash
-cd ~/gstack-copilot
+curl -fsSLO https://raw.githubusercontent.com/gpoffet/gstack-copilot/main/get.sh
+less get.sh
+bash get.sh
+```
+
+You can also clone this repository and run `/path/to/gstack-copilot/install.sh`
+from your project.
+
+Your project receives:
+
+| Path | Content |
+|---|---|
+| `.github/skills/gstack-*/` | the skills, one folder each |
+| `.github/skills/gstack/` | the runtime: `/gstack` router, tools, libraries, references, licenses |
+| `.github/hooks/gstack-safety.json` | the `preToolUse` hook behind `/gstack-careful` and `/gstack-freeze` |
+| `AGENTS.md` | a section between markers with the workflow and routing; the rest of the file is left alone |
+
+Commit them (`git add .github AGENTS.md`) so the whole team gets the skills.
+GStack's user state (settings, learnings, logs) stays in `~/.gstack/`, outside
+the repository. Reinstalling replaces the previous version cleanly, and
+uninstalling restores `AGENTS.md` as it was.
+
+## Copilot harness or Local harness
+
+VS Code can run its agent on two engines. **Copilot** (recommended) shares its
+runtime with Copilot CLI: GStack's generator writes for its tool names
+(`ask_user`, `task`, `view`), and its hook format is the one installed here.
+**Local**, the older engine, also runs the skills: the `AGENTS.md` section maps
+its tool names. The hook accepts both event formats.
+
+## Safety: /gstack-careful and /gstack-freeze
+
+Copilot ignores hooks declared inside a skill, so gstack-copilot installs a
+repository hook that calls GStack's own safety checks.
+
+* With neither mode active, the hook makes no decision and starts no Python process.
+* `/gstack-careful` sets a flag for 12 hours. Destructive commands then need
+  confirmation (`git reset --hard`, `git push --force`, `DROP TABLE`...) or are
+  denied outright (`rm -rf /`, `rm -rf ~`).
+* `/gstack-freeze <folder>` denies file edits outside that folder (edit,
+  create and patch tools). Terminal commands are not path-checked.
+* `/gstack-unfreeze` lifts the boundary, and also ends careful mode when asked to.
+* The hook never blocks by accident: on any internal error it answers "no
+  decision", because Copilot denies the tool when a `preToolUse` hook fails.
+
+Hooks run code on your machine, like any agent plugin. Read
+`.github/skills/gstack/copilot/` before installing if that matters to you, or
+install with `--no-hooks`.
+
+## Which GStack skills are left out
+
+`skills.txt` lists the installed skills and, in comments, the excluded ones:
+
+* skills that need GStack's compiled browser, design engine or PDF renderer
+  (`/browse`, `/qa`, `/design-review`, `/canary`...);
+* `/cso`: it needs a native launcher and Docker, and its trust model rejects a
+  launcher shipped inside the repository being audited;
+* outside reviews through other CLIs (`/codex`, `/claude-code`) and GBrain memory;
+* `/gstack-upgrade`: updates come from gstack-copilot releases instead.
+
+When GStack announces a newer version during a skill, the agent mentions it
+once and never tries to upgrade in place. To turn the check off:
+`.github/skills/gstack/bin/gstack-config set update_check false`.
+
+## Migrating from the legacy port
+
+The earlier `install-gstack.sh` script copied the skills into `.agents/skills/`
+with absolute paths. The installer detects it, offers to remove the old folders
+and their `AGENTS.md` section, then installs the new version. It also points at
+`chat.tools.terminal.autoApprove` rules in `.vscode/settings.json` that still
+mention `.agents/skills`, to clean up by hand.
+
+## Known limitations
+
+* The hook has been tested with simulated events in the documented format.
+  Copilot's edit tool names are not publicly listed, so the hook matches names
+  containing `edit`, `write`, `create`, `patch`, `replace` or `insert`. Type
+  `/hooks` in the chat to check the hook is loaded.
+* Skills are large (roughly 15k to 80k tokens once loaded): one skill per
+  conversation works best.
+* GStack's preamble loads its `claude` model overlay; with other models these
+  instructions stay generic and harmless.
+
+## For maintainers
+
+| File | Role |
+|---|---|
+| `GSTACK_REF` | pinned GStack commit |
+| `skills.txt` | installed skills |
+| `build.sh` | renders GStack with `gen:skill-docs --host copilot`, then `scripts/assemble.py` builds `dist/` |
+| `install.sh` | copies `dist/` into a project, no rewriting at install time |
+| `get.sh` | one-line installer: downloads a release, verifies it, runs `install.sh` |
+| `scripts/package.sh` | builds the release archive |
+| `templates/` | hook, skill additions, `AGENTS.md` section |
+| `tests/` | static checks and an end-to-end install test |
+| `dist/` | build output, committed |
+
+`dist/` is reproducible: CI rebuilds it from `GSTACK_REF` and fails on any
+difference. `tests/smoke.sh` installs into a throwaway repository and checks the
+tools, the skill preambles, the hook, `get.sh` and uninstalling.
+
+**Following GStack.** Every Monday, the *Track GStack* workflow rebuilds from
+GStack's latest commit, runs the tests and opens a pull request. Enable
+*Allow GitHub Actions to create and approve pull requests* in Settings >
+Actions > General for it to work. To do it by hand:
+
+```bash
 git -C .build/gstack fetch origin main && git -C .build/gstack rev-parse FETCH_HEAD > GSTACK_REF
 ./build.sh && tests/smoke.sh
-git add GSTACK_REF dist && git commit -m "chore: GStack $(cat dist/.github/skills/gstack/VERSION)"
 ```
 
-Puis dans chaque projet : `~/gstack-copilot/install.sh`. L'installation
-précédente est remplacée, `AGENTS.md` est mis à jour entre ses marqueurs.
+**Releasing.** Tag the merged commit with `v<GStack version>-<n>`; the
+*Release* workflow tests, packages and publishes it, and `get.sh` picks it up:
 
-Quand GStack signale une nouvelle version pendant un skill, l'agent le
-mentionne une fois sans tenter de mise à jour sur place. Pour couper ce
-contrôle : `.github/skills/gstack/bin/gstack-config set update_check false`.
-
-## Choisir les skills
-
-`skills.txt` liste les skills installés, avec en commentaire ceux qui sont
-exclus et pourquoi. Après modification : `./build.sh`, `tests/smoke.sh`, puis
-réinstaller dans les projets. Les exclusions principales :
-
-* les skills qui demandent le navigateur, le moteur de design ou le générateur
-  PDF compilés de GStack (`/browse`, `/qa`, `/design-review`, `/canary`...) ;
-* `/cso` : il exige un lanceur natif et Docker, et son modèle de confiance
-  refuse justement un lanceur qui viendrait du dépôt audité ;
-* les revues externes via d'autres CLI (`/codex`, `/claude-code`) et la mémoire
-  GBrain ;
-* `/gstack-upgrade`, remplacé par le circuit de mise à jour ci-dessus.
-
-## Migrer depuis l'ancien portage
-
-L'ancien script `install-gstack.sh` copiait les skills dans `.agents/skills/`
-avec des chemins absolus. `install.sh` le détecte, propose de supprimer les
-anciens dossiers et l'ancienne section d'`AGENTS.md`, puis installe la nouvelle
-version. Il signale aussi les règles `chat.tools.terminal.autoApprove` de
-`.vscode/settings.json` qui pointent encore vers `.agents/skills`, à nettoyer à
-la main.
-
-## Limites connues
-
-* Le hook n'a été vérifié qu'avec des événements simulés au format documenté.
-  Les noms des outils d'édition du harness Copilot ne sont pas listés
-  publiquement : le hook reconnaît les noms contenant `edit`, `write`, `create`,
-  `patch`, `replace` ou `insert`. À confirmer dans une vraie session (`/hooks`
-  dans le chat montre les hooks chargés).
-* Les skills sont volumineux (de 15 à 80 000 tokens environ une fois chargés) : un
-  seul skill à la fois par conversation donne les meilleurs résultats.
-* Le préambule de GStack charge le profil de modèle `claude` ; avec un autre
-  modèle dans Copilot, ces consignes restent génériques et sans effet néfaste.
-
-## Structure du dépôt
-
-```
-GSTACK_REF            commit GStack épinglé
-skills.txt            skills installés
-build.sh              régénère dist/
-install.sh            installe dans un projet
-scripts/assemble.py   transforme la sortie du générateur GStack en dist/
-templates/            hook, compléments de skills, section AGENTS.md
-tests/                contrôles statiques et test d'installation
-dist/                 résultat du build, committé
+```bash
+git tag v1.91.176.0-1 && git push origin v1.91.176.0-1
 ```
 
-## Licence
+## License
 
-GStack est distribué sous licence MIT (Copyright (c) 2026 Garry Tan), avec des
-fichiers dérivés d'œuvres sous Apache-2.0 : `LICENSE`, `NOTICE.md` et
-`licenses/` sont copiés dans chaque installation sous `.github/skills/gstack/`.
+MIT, see [LICENSE](LICENSE). `dist/` contains GStack files, Copyright (c) 2026
+Garry Tan, under the MIT License, some derived from Apache-2.0 works; their
+license texts ship with every install under `.github/skills/gstack/`.

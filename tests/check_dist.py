@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Vérifications statiques d'une arborescence .github/skills de gstack-copilot.
+"""Static checks on a gstack-copilot .github/skills tree.
 
-Usage : python3 -I tests/check_dist.py <dossier contenant .github/>
+Usage: python3 -I tests/check_dist.py <folder containing .github/>
 
-Contrôle :
-  * frontmatter de chaque skill : name égal au dossier, description de 1 à 1024 caractères ;
-  * plus aucun chemin d'installation utilisateur (~/.copilot/skills) dans les .md ;
-  * chaque binaire ou fichier référencé sous la racine gstack/ existe ;
-  * syntaxe des scripts bash du runtime (bash -n).
+Checks:
+  * each skill's frontmatter: name equals its folder, description of 1 to 1024 characters;
+  * no per-user install path (~/.copilot/skills) left in the .md files;
+  * every binary or file referenced under the gstack/ root exists;
+  * syntax of the runtime's bash scripts (bash -n).
 """
 import re
 import subprocess
@@ -24,7 +24,7 @@ REF_RE = re.compile(
     r"(?:\$GSTACK_ROOT|\$\{GSTACK_ROOT\}|\$\(git rev-parse --show-toplevel\)/\.github/skills/gstack)"
     r"/([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)")
 BIN_RE = re.compile(r"(?:\$GSTACK_BIN|\$\{GSTACK_BIN\}|\$_BIN)/([A-Za-z0-9_.-]+)")
-# Ressources volontairement non livrées (navigateur, design, PDF, CSO).
+# Assets left out on purpose (browser, design, PDF, CSO).
 NOT_SHIPPED = ("browse/dist", "design/dist", "make-pdf/dist", "design-html/", "extension",
                "bin/gstack-cso", "bin/gstack-global-discover", "lib/diagram-render")
 
@@ -54,25 +54,25 @@ def description(fm):
 for d in sorted(p for p in skills.iterdir() if p.is_dir()):
     md = d / "SKILL.md"
     if not md.exists():
-        errors.append(f"{d.name}: SKILL.md manquant")
+        errors.append(f"{d.name}: SKILL.md is missing")
         continue
     fm = frontmatter(md.read_text())
     if fm is None:
-        errors.append(f"{d.name}: frontmatter absent")
+        errors.append(f"{d.name}: no frontmatter")
         continue
     name = re.search(r"^name:\s*(\S+)", fm, re.M)
     name = name.group(1) if name else ""
     if name != d.name or not NAME_RE.match(name):
-        errors.append(f"{d.name}: name '{name}' différent du dossier ou invalide")
+        errors.append(f"{d.name}: name '{name}' differs from the folder or is invalid")
     desc = description(fm)
     if not 0 < len(desc) <= 1024:
-        errors.append(f"{d.name}: description de {len(desc)} caractères")
+        errors.append(f"{d.name}: description is {len(desc)} characters")
 
 missing = set()
 for md in skills.rglob("*.md"):
     text = md.read_text()
     if "~/.copilot/skills" in text or "$HOME/.copilot/skills" in text:
-        errors.append(f"{md.relative_to(base)}: chemin ~/.copilot/skills restant")
+        errors.append(f"{md.relative_to(base)}: leftover ~/.copilot/skills path")
     for rel in REF_RE.findall(text):
         rel = rel.rstrip(".")
         if rel.startswith(NOT_SHIPPED) or "*" in rel or "<" in rel:
@@ -84,7 +84,7 @@ for md in skills.rglob("*.md"):
         if not (root / "bin" / name).exists() and not f"bin/{name}".startswith(NOT_SHIPPED):
             missing.add(f"bin/{name}")
 for rel in sorted(missing):
-    errors.append(f"référence introuvable sous gstack/ : {rel}")
+    errors.append(f"missing reference under gstack/: {rel}")
 
 for script in sorted((root / "bin").iterdir()):
     head = script.read_bytes()[:64]
@@ -94,6 +94,6 @@ for script in sorted((root / "bin").iterdir()):
             errors.append(f"bash -n {script.name}: {res.stderr.strip()[:200]}")
 
 if errors:
-    print("\n".join(f"ECHEC {e}" for e in errors))
+    print("\n".join(f"FAIL {e}" for e in errors))
     sys.exit(1)
-print(f"check_dist: OK ({sum(1 for _ in skills.iterdir())} dossiers sous .github/skills)")
+print(f"check_dist: OK ({sum(1 for _ in skills.iterdir())} folders under .github/skills)")

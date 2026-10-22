@@ -6,30 +6,30 @@ on:
 
 jobs:
   smoke:
-    name: Tests d'installation
+    name: Install tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
       - run: tests/smoke.sh
 
   reproducible:
-    name: dist/ correspond à GSTACK_REF
+    name: dist/ matches GSTACK_REF
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
       - run: ./build.sh
-      - name: Aucun écart entre dist/ et la régénération
+      - name: No drift between dist/ and a rebuild
         run: |
           changes="$(git status --porcelain -- dist)"
           [ -z "$changes" ] && exit 0
-          # Une annotation par fichier en écart, lisible sans ouvrir les logs.
-          printf '%s\n' "$changes" | head -20 | while IFS= read -r line; do echo "::error::dist diffère : $line"; done
+          # One annotation per drifting file, readable without opening the logs.
+          printf '%s\n' "$changes" | head -20 | while IFS= read -r line; do echo "::error::dist differs: $line"; done
           git diff --stat -- dist | tail -1 | sed 's/^/::error::/'
-          git diff -- dist | head -40 | grep '^[+-]' | grep -v '^+++\|^---' | head -6 | sed 's/^/::error::extrait /'
+          git diff -- dist | head -40 | grep '^[+-]' | grep -v '^+++\|^---' | head -6 | sed 's/^/::error::excerpt /'
           exit 1

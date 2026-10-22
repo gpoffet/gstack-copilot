@@ -1,35 +1,32 @@
-<!-- gstack-copilot:start (section gérée par install.sh, ne pas éditer entre ces marqueurs) -->
+<!-- gstack-copilot:start (managed by gstack-copilot's install.sh, do not edit between these markers) -->
 ## GStack (gstack-copilot, GStack {{VERSION}} @ {{COMMIT}})
 
-Les skills GStack sont dans `.github/skills/gstack-*/`, leur runtime dans
-`.github/skills/gstack/` et l'état utilisateur dans `~/.gstack/`. Ils
-s'invoquent avec le préfixe `gstack-` (`/review` est une commande native de
-Copilot). `/gstack` aiguille vers le bon skill en cas de doute.
+GStack skills live in `.github/skills/gstack-*/`, their runtime in
+`.github/skills/gstack/`, and user state in `~/.gstack/`. Invoke them with the
+`gstack-` prefix (`/review` is a Copilot built-in). `/gstack` routes to the
+right skill when in doubt.
 
-Boucle de référence : `/gstack-office-hours` ou `/gstack-spec` pour cadrer,
-`/gstack-plan-eng-review` pour verrouiller l'architecture (ou `/gstack-autoplan`
-pour enchaîner toutes les revues de plan), implémentation après validation,
-`/gstack-review` sur le diff, `/gstack-ship` pour livrer, `/gstack-retro` en fin
-de cycle.
+Reference loop: `/gstack-office-hours` or `/gstack-spec` to frame the work,
+`/gstack-plan-eng-review` to lock the architecture (or `/gstack-autoplan` to run
+every plan review in a row), implement once approved, `/gstack-review` on the
+diff, `/gstack-ship` to ship, `/gstack-retro` at the end of the cycle.
 
-Routage :
-* idée produit : `/gstack-office-hours`
-* stratégie et périmètre : `/gstack-plan-ceo-review`
-* architecture : `/gstack-plan-eng-review`
-* bug : `/gstack-investigate`
-* revue de code : `/gstack-review`
-* livraison : `/gstack-ship`
-* documentation : `/gstack-document-generate`, puis `/gstack-document-release` après livraison
-* qualité globale : `/gstack-health`
-* reprise de travail : `/gstack-context-save` et `/gstack-context-restore`
-* opérations sensibles : `/gstack-careful`, `/gstack-freeze`, `/gstack-guard`
+Routing:
+* product idea: `/gstack-office-hours`
+* strategy and scope: `/gstack-plan-ceo-review`
+* architecture: `/gstack-plan-eng-review`
+* bug: `/gstack-investigate`
+* code review: `/gstack-review`
+* shipping: `/gstack-ship`
+* documentation: `/gstack-document-generate`, then `/gstack-document-release` after shipping
+* overall code health: `/gstack-health`
+* resuming work: `/gstack-context-save` and `/gstack-context-restore`
+* risky operations: `/gstack-careful`, `/gstack-freeze`, `/gstack-guard`
 
-Correspondance des outils : les skills parlent de `AskUserQuestion` (poser une
-question à l'utilisateur), de l'outil `Agent` (lancer un subagent) et de `Read`.
-Dans le harness Copilot ce sont `ask_user`, `task` et `view`. Dans le harness
-Local de VS Code, ce sont `#vscode/askQuestions`, `#agent/runSubagent` et
-`#read/readFile`.
+Tool names: the skills mention `AskUserQuestion` (ask the user a question), the
+`Agent` tool (run a subagent) and `Read`. In the Copilot harness these are
+`ask_user`, `task` and `view`. In VS Code's Local harness they are
+`#vscode/askQuestions`, `#agent/runSubagent` and `#read/readFile`.
 
-Les blocs bash des skills s'exécutent depuis la racine du dépôt et nécessitent
-Bun (https://bun.sh).
+The skills' bash blocks run from the repository root and need Bun (https://bun.sh).
 <!-- gstack-copilot:end -->
