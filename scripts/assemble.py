@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -268,8 +269,11 @@ def main():
     commit = subprocess.run(["git", "-C", str(src), "rev-parse", "--short=9", "HEAD"],
                             capture_output=True, text=True).stdout.strip() or args.ref
     # Commit date rather than build time: rebuilding the same ref gives the same dist/.
-    commit_date = subprocess.run(["git", "-C", str(src), "log", "-1", "--format=%cI"],
-                                 capture_output=True, text=True).stdout.strip()
+    # Epoch, then formatted here: %cI renders UTC as "Z" or "+00:00" depending on the git version.
+    stamp = subprocess.run(["git", "-C", str(src), "log", "-1", "--format=%ct"],
+                           capture_output=True, text=True).stdout.strip()
+    commit_date = (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(stamp)))
+                   if stamp.isdigit() else "")
     manifest = {
         "gstack_version": version,
         "gstack_commit": commit,
