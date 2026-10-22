@@ -47,5 +47,11 @@ jobs:
           print("```bash\ncurl -fsSL https://raw.githubusercontent.com/gpoffet/gstack-copilot/main/get.sh | bash\n```\n")
           print(f"Skills: {skills}")
           EOF
-          gh release create "$GITHUB_REF_NAME" out/gstack-copilot.tar.gz out/gstack-copilot.tar.gz.sha256 \
-            --title "gstack-copilot $GITHUB_REF_NAME" --notes-file notes.md
+          # A release drafted in the GitHub UI already exists when this runs: fill it in.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" out/gstack-copilot.tar.gz out/gstack-copilot.tar.gz.sha256 --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "gstack-copilot $GITHUB_REF_NAME" --notes-file notes.md --draft=false
+          else
+            gh release create "$GITHUB_REF_NAME" out/gstack-copilot.tar.gz out/gstack-copilot.tar.gz.sha256 \
+              --title "gstack-copilot $GITHUB_REF_NAME" --notes-file notes.md
+          fi
