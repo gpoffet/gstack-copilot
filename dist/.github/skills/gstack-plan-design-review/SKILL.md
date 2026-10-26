@@ -82,9 +82,9 @@ Host and system plan-mode restrictions and the user's current scope take precede
 
 Run the invoked skill within the host's plan-mode limits. **Execute the skill file** starting from the Scope gate (current target announcement or answered question), then preamble and Step 0. Skill questions are valid; skip only questions the skill resolves. Any AskUserQuestion variant satisfies end-of-turn; use AskUserQuestion Format's tool resolution. If unavailable/failed: `headless` → BLOCKED; `interactive` → prose fallback (satisfies end-of-turn). At STOP, stop: no continuation or ExitPlanMode. Run "PLAN MODE EXCEPTION — ALWAYS RUN" commands only where the host permits. ExitPlanMode only after skill completion or if the user cancels the skill or tells you to leave plan mode.
 
-If `PROACTIVE` is `false`, do not auto-invoke or suggest skills, including by asking whether to run one. Only run skills the user explicitly invokes.
+If `PROACTIVE` is `off`: suggest no skills unasked, nor ask. `core`: only /office-hours, /review, /qa, /ship. `all`: any. Skills the user names or this one invokes run.
 
-If `SKILL_PREFIX` is `"true"`, suggest/invoke `/gstack-*` names. Disk paths stay `$GSTACK_ROOT/[skill-name]/SKILL.md`.
+If `SKILL_PREFIX` is `true` use `/gstack-*` names; paths stay `$GSTACK_ROOT/[skill-name]/SKILL.md`.
 
 ## AskUserQuestion Format
 
@@ -477,7 +477,7 @@ only under the Step 0.5 conditions (no UI scope, designer unavailable, or the us
 
 Commands: `generate` (single mockup), `variants` (multiple directions), `compare`
 (side-by-side review board), `iterate` (refine with feedback), `check` (cross-model
-quality gate via GPT-4o vision), `evolve` (improve from screenshot).
+quality gate via OpenAI vision), `evolve` (improve from screenshot).
 
 Setup is handled by the DESIGN SETUP section below. If `DESIGN_READY` is printed,
 the designer is available and you should use it.

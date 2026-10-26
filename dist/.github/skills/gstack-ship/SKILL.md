@@ -48,9 +48,9 @@ Host and system plan-mode restrictions and the user's current scope take precede
 
 If the user invokes a skill in plan mode, run its workflow within the host's plan-mode limits. **Treat the skill file as executable instructions, not reference.** Follow it step by step starting from Step 0; any AskUserQuestion the skill fires is the workflow operating within plan mode, not a violation of it — and a skill whose instructions resolve a question themselves (e.g. a plan-mode auto-select) may legitimately not ask it. AskUserQuestion (any variant — `mcp__*__AskUserQuestion` or native; see "AskUserQuestion Format → Tool resolution") satisfies plan mode's end-of-turn requirement. If AskUserQuestion is unavailable or a call fails, follow the AskUserQuestion Format failure fallback: `headless` → BLOCKED; `interactive` → the prose fallback (also satisfies end-of-turn). At a STOP point, stop immediately. Do not continue the workflow or call ExitPlanMode there. Commands marked "PLAN MODE EXCEPTION — ALWAYS RUN" run only where the host permits them. Call ExitPlanMode only after the skill workflow completes, or if the user tells you to cancel the skill or leave plan mode.
 
-If `PROACTIVE` is `false`, do not auto-invoke or suggest skills, including by asking whether to run one. Only run skills the user explicitly invokes.
+If `PROACTIVE` is `off`: suggest no skills unasked, nor ask. `core`: only /office-hours, /review, /qa, /ship. `all`: any. Skills the user names or this one invokes run.
 
-If `SKILL_PREFIX` is `"true"`, suggest/invoke `/gstack-*` names. Disk paths stay `$GSTACK_ROOT/[skill-name]/SKILL.md`.
+If `SKILL_PREFIX` is `true` use `/gstack-*` names; paths stay `$GSTACK_ROOT/[skill-name]/SKILL.md`.
 
 ## AskUserQuestion Format
 
@@ -798,7 +798,7 @@ chooses it in item 2 and ALREADY_BUMPED derives it in item 1.
    Save lowercase `BUMP_LEVEL`. A claimed version may move the next available number
    forward, but cannot change the chosen MICRO/PATCH/MINOR/MAJOR level.
 
-3. **Queue-aware pick** (workspace-aware ship):
+3. **Queue-aware pick:**
    ```bash
    QUEUE_JSON=$(bun --no-env-file --config=/dev/null run $(git rev-parse --show-toplevel)/.github/skills/gstack/bin/gstack-next-version --base <base> --bump "$BUMP_LEVEL" --current-version "$BASE_VERSION" 2>/dev/null || echo '{"offline":true}')
    CANDIDATE_VERSION=$(echo "$QUEUE_JSON" | jq -r '.version // empty')
@@ -807,6 +807,10 @@ chooses it in item 2 and ALREADY_BUMPED derives it in item 1.
    `offline:false` qualifies; `offline:true` qualifies only with `fallback:"git"`.
    Offline output without that fallback, failure, malformed output or an empty version
    is unusable, even when it contains a version-looking string.
+
+   **Incomplete** (`complete:false`): PRs in `unknown_claims` went unread; the pick may
+   collide. Rerun item 3 once; still incomplete, AskUserQuestion: use it (recommended;
+   Version Gate CI rereads the queue) or stop.
 
    - **Usable candidate:** print warnings and claimed queue. FRESH sets `NEW_VERSION=CANDIDATE_VERSION`.
      ALREADY_BUMPED compares it with `currentVersion`: if different, ask to rebump
@@ -819,16 +823,13 @@ chooses it in item 2 and ALREADY_BUMPED derives it in item 1.
 
 4. **Write the bump** (FRESH, or an approved rebump):
    ```bash
-   bun --no-env-file --config=/dev/null run $(git rev-parse --show-toplevel)/.github/skills/gstack/bin/gstack-version-bump write --version "$NEW_VERSION" --regen-digest
+   bun --no-env-file --config=/dev/null run $(git rev-parse --show-toplevel)/.github/skills/gstack/bin/gstack-version-bump write --version "$NEW_VERSION" --regen-digest --changelog CHANGELOG.md
    ```
-   The CLI validates `MAJOR.MINOR.PATCH.MICRO` (or pinned 3-digit semver), writes
-   VERSION, the manifest (`--package-json-path` → `.gstack/package-json-path` →
-   `./package.json`) and existing npm lockfiles, never creating one, with the 3-digit
-   translation (`1.67.0.0` → `1.67.0`); VERSION is authoritative. Exit 3 is a half-write:
-   reclassify and `repair` DRIFT_STALE_PKG.
+   It writes VERSION, manifest and lockfiles, and moves `## [Unreleased]` under NEW_VERSION
+   for Step 13. Exit 2 wrote nothing: show stderr, stop.
+   Exit 3 is a half-write: reclassify and `repair` DRIFT_STALE_PKG.
 
-   `--regen-digest` runs repo code (`scripts/gen-agents-digest.ts`) with Step 5's privileges
-   only when it and committed `agents-digest/gstack-AGENTS.md` exist; if `agentsDigest` is
+   `--regen-digest` runs `scripts/gen-agents-digest.ts` only when it and a committed `agents-digest/gstack-AGENTS.md` exist; if `agentsDigest` is
    false, run `bun --no-env-file --config=/dev/null scripts/gen-agents-digest.ts` and stage the digest with the bump. Before
    push, verify the committed digest matches generation for the selected VERSION.
 
@@ -1158,7 +1159,9 @@ Lookup failure or ambiguous matches **STOP** for resolution, never mean no PR.
 Save the result for Step 19's recheck.
 
 The pr-body section prepares the title from that result, then publishes;
-`--no-pr` or an automation lane takes the handoff section.
+`--no-pr` or an automation lane takes the handoff section. Unattended (`UNATTENDED_SHIP:`
+echoed): an open PR at HEAD takes pr-body's existing-PR path (body and title only, no
+`pr-create`, no push); else handoff.
 
 > **STOP.** Before preparing the title and creating or updating the PR/MR with the verified documentation outcome (Steps 18-19), Read `sections/pr-body.md` relative to the installed `gstack-ship` SKILL.md directory and execute it
 > in full. Do not work from memory — that section is the source of truth for this step.
@@ -1176,13 +1179,12 @@ $(git rev-parse --show-toplevel)/.github/skills/gstack/bin/gstack-review-log '{"
 ```
 
 Substitute from earlier steps:
-- **COVERAGE_PCT**: Step 7 diagram's integer percentage; encode null/undetermined as -1
-- **COVERAGE_PCT_VALUE**: Step 7's `coverage_pct_value` (the gate's X) as an integer, or `null` when missing or ignored
-- **WEAK_GAPS**, **TESTS_EXTENDED**, **TESTS_REJECTED**: counts of Step 7's `weak_gaps`, `tests_extended` and `tests_rejected` (0 when the key is missing or ignored)
-- **REGRESSION_PROOF**: `{"red_at_head":N,"base_green":N,"base_unavailable":N}` from Step 7, or `null` when missing
-- **PLAN_TOTAL**: total plan items extracted in Step 8 (0 if no plan file)
-- **PLAN_DONE**: count of DONE + CHANGED items from Step 8 (0 if no plan file)
-- **VERIFY_RESULT**: "pass", "fail", or "skipped", set after Step 9 executes Step 8.1's verification list
+- **COVERAGE_PCT**: Step 7's integer percentage; -1 when null or undetermined
+- **COVERAGE_PCT_VALUE**: Step 7's `coverage_pct_value` (the gate's X) as an integer; `null` when missing or ignored
+- **WEAK_GAPS**, **TESTS_EXTENDED**, **TESTS_REJECTED**: counts of Step 7's `weak_gaps`, `tests_extended`, `tests_rejected` (0 when missing or ignored)
+- **REGRESSION_PROOF**: Step 7's `{"red_at_head":N,"base_green":N,"base_unavailable":N}`; `null` when missing
+- **PLAN_TOTAL** / **PLAN_DONE**: Step 8's plan items, total and DONE + CHANGED (0 with no plan file)
+- **VERIFY_RESULT**: "pass", "fail" or "skipped", set when Step 9 runs Step 8.1's verification list
 - **VERSION**: `NEW_VERSION` from Step 12; `null` (unquoted) under NO_VERSION
 
 The shell supplies the branch. Run it without confirmation.
@@ -1198,15 +1200,26 @@ GSTACK_STATE_ROOT=$($(git rev-parse --show-toplevel)/.github/skills/gstack/bin/g
 _NUDGE_MARKER="$GSTACK_STATE_ROOT/.plan-tune-nudge-shown"
 _QT=$($(git rev-parse --show-toplevel)/.github/skills/gstack/bin/gstack-config get question_tuning 2>/dev/null || echo "false")
 if [ ! -f "$_NUDGE_MARKER" ] && [ "$_QT" = "false" ]; then
-  echo ""
-  echo "gstack can learn from your AskUserQuestion answers. Run /plan-tune to opt in"
-  echo "— it captures which prompts you find valuable vs noisy and (with hooks installed)"
-  echo "auto-decides your never-ask preferences."
+  printf '\ngstack can learn from your AskUserQuestion answers. Run /plan-tune to opt in: it captures which prompts you find valuable vs noisy and (with hooks installed) auto-decides your never-ask preferences.\n'
   mkdir -p "$GSTACK_STATE_ROOT" && touch "$_NUDGE_MARKER"
 fi
 ```
 
 The marker or enabled question_tuning suppresses it; remove the marker to re-enable.
+
+---
+
+## Step 22: Terminal line (every run)
+
+The last line printed is the result line a parent greps (docs/unattended.md):
+
+```bash
+$(git rev-parse --show-toplevel)/.github/skills/gstack/bin/gstack-ship-receipt result --pr <pr-number>   # handoff: --body .gstack/tmp/ship-receipt.md
+```
+
+It binds the receipt to HEAD, writes the run record and prints `GSTACK_RESULT: skill=ship
+status=complete run=<dir>`; `QUEUE_RECEIPT_STALE` means HEAD moved after the receipt (rewrite,
+repost, rerun). A run that STOPs earlier ends with `GSTACK_RESULT: skill=ship status=refused run=-`.
 
 ---
 
