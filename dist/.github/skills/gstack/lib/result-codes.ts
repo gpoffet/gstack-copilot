@@ -166,7 +166,7 @@ export const RESULT_CODES = {
   // C-stamp (plan C1, C2, C3, C5, C7): ship policy, restamp, tree receipt, ship receipt.
   POLICY_SOURCE_UNAVAILABLE: {
     anchor: 'policy-source-unavailable',
-    summary: 'policy source unavailable: origin/<base> is not a resolvable commit, so the reviewed .gstack/ship-policy.json cannot be read',
+    summary: 'policy source unavailable: origin/<base> is not a resolvable commit, or a pin file committed on it cannot be read, so the reviewed .gstack/ship-policy.json cannot be read',
     fix: 'git fetch origin <base> --depth=1 (the working-tree copy is never used silently)',
   },
   POLICY_INVALID: {
@@ -226,8 +226,8 @@ export const RESULT_CODES = {
   },
   CHANGELOG_DUPLICATE_HEADING: {
     anchor: 'changelog-duplicate-heading',
-    summary: 'two CHANGELOG sections carry the same version heading',
-    fix: 'merge the duplicate sections into one entry under the new version',
+    summary: 'two CHANGELOG sections carry the same version heading, beyond any duplicate the base branch already carries',
+    fix: 'merge the duplicate sections the PR introduced into one entry under the new version',
   },
   CHANGELOG_TOP_MISMATCH: {
     anchor: 'changelog-top-mismatch',
@@ -364,7 +364,7 @@ export const RESULT_CODES = {
   },
   PREGATE_CONFIG_INVALID: {
     anchor: 'pregate-config-invalid',
-    summary: '.gstack/pregate.json has an unknown key, a wrong type, a non-downgradable check in `warn`, or an uncontained glob',
+    summary: 'the pregate policy (.gstack/pregate.json, or the user-owned copy) has an unknown key, a wrong type, a non-downgradable check in `warn`, or an uncontained glob',
     fix: 'run `gstack-pregate validate` and fix the file on the base branch (secrets and required lanes cannot be downgraded)',
   },
   PREGATE_SECRETS: {
@@ -385,7 +385,7 @@ export const RESULT_CODES = {
   PREGATE_NO_LANE: {
     anchor: 'pregate-no-lane',
     summary: 'a touched source file maps to no test lane through imports, repo-path literals, the bin/<name> convention or a declaration',
-    fix: 'add a test that names the file, or declare its lane (or an explicit empty lane) under `dependencies` in .gstack/pregate.json. Markdown no test depends on is already a docs/no-tests empty lane; other documentation goes in `empty_lanes`',
+    fix: 'add a test that names the file, or declare its lane (or an explicit empty lane) under `dependencies` in .gstack/pregate.json. Markdown no test depends on is already a docs/no-tests empty lane; other documentation goes in `empty_lanes`; a release manifest whose only change against the merge base is its version values is waived as version-stamp-only',
   },
   PREGATE_LANE_FAILED: {
     anchor: 'pregate-lane-failed',
