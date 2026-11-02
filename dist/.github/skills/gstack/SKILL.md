@@ -12,9 +12,10 @@ description: |
 ## Preamble (run first)
 
 ```bash
-[ -d "${GSTACK_ROOT:-/-}/bin" ]&&[ -d "$GSTACK_ROOT/lib" ]||{ _r=$(git rev-parse --show-toplevel 2>/dev/null)/.github/skills/gstack;[ -d "$_r/bin" ]||_r=$(git rev-parse --show-toplevel)/.github/skills/gstack;[ -d "$_r/bin" ]||{ echo "gstack: no install found (tried $_r). Fix: run gstack-copilot's install.sh from the repository root.">&2;exit 1;};GSTACK_ROOT=$_r;}
-GSTACK_BIN=$GSTACK_ROOT/bin
-"$GSTACK_BIN/gstack-skill-start" --skill "gstack" --model "claude"
+[ -d "${GSTACK_ROOT:-/-}/lib" ]&&[ -d "$GSTACK_ROOT/bin" ]||GSTACK_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)/.github/skills/gstack
+[ -d "$GSTACK_ROOT/bin" ]||GSTACK_ROOT=$(git rev-parse --show-toplevel)/.github/skills/gstack
+[ -d "$GSTACK_ROOT/bin" ]||echo "gstack: no install found (tried $GSTACK_ROOT). Fix: run gstack-copilot's install.sh from the repository root.">&2
+"$GSTACK_ROOT/bin/gstack-skill-start" --skill "gstack" --model "claude"
 ```
 
 **GitHub Copilot tool names:** `AskUserQuestion` means your `ask_user` tool (one question per call: put the decision brief in the question and each option in the choices). `ExitPlanMode` means `exit_plan_mode`; the Agent tool means `task`; the Read tool means `view`; the Skill tool means `skill`. Copilot has no `mcp__*__AskUserQuestion` variant. **On Windows:** run each bash block in Git for Windows Bash by its full path (usually `C:\Program Files\Git\bin\bash.exe`; bare `bash` can start WSL instead). Never translate a block into PowerShell, and never run an extensionless gstack helper from PowerShell directly: Windows opens an app picker instead of running it.
@@ -46,9 +47,9 @@ Host and system plan-mode restrictions and the user's current scope take precede
 
 If the user invokes a skill in plan mode, run its workflow within the host's plan-mode limits. **Treat the skill file as executable instructions, not reference.** Follow it step by step starting from Step 0; any AskUserQuestion the skill fires is the workflow operating within plan mode, not a violation of it — and a skill whose instructions resolve a question themselves (e.g. a plan-mode auto-select) may legitimately not ask it. AskUserQuestion (any variant — `mcp__*__AskUserQuestion` or native; see "AskUserQuestion Format → Tool resolution") satisfies plan mode's end-of-turn requirement. If AskUserQuestion is unavailable or a call fails, follow the AskUserQuestion Format failure fallback: `headless` → BLOCKED; `interactive` → the prose fallback (also satisfies end-of-turn). At a STOP point, stop immediately. Do not continue the workflow or call ExitPlanMode there. Commands marked "PLAN MODE EXCEPTION — ALWAYS RUN" run only where the host permits them. Call ExitPlanMode only after the skill workflow completes, or if the user tells you to cancel the skill or leave plan mode.
 
-If `PROACTIVE` is `false`, do not auto-invoke or suggest skills, including by asking whether to run one. Only run skills the user explicitly invokes.
+If `PROACTIVE` is `off`: suggest no skills unasked, nor ask. `core`: only /office-hours, /review, /qa, /ship. `all`: any. Skills the user names or this one invokes run.
 
-If `SKILL_PREFIX` is `"true"`, suggest/invoke `/gstack-*` names. Disk paths stay `$GSTACK_ROOT/[skill-name]/SKILL.md`.
+If `SKILL_PREFIX` is `true` use `/gstack-*` names; paths stay `$GSTACK_ROOT/[skill-name]/SKILL.md`.
 
 ## Artifacts Sync (skill start)
 
@@ -171,17 +172,27 @@ output echoed:
 $(git rev-parse --show-toplevel)/.github/skills/gstack/bin/gstack-telemetry-log --event-type route --skill gstack --outcome ROUTE_OUTCOME --session-id "SESSION_ID" 2>/dev/null || true
 ```
 
-If `PROACTIVE` is `false`: do not proactively invoke or suggest other gstack skills during
-this session, including by asking whether to run one ("want me to run /X?"). Only run
-skills the user explicitly invokes. This preference persists across sessions via
+If `PROACTIVE` is `false` or `off`: do not proactively invoke or suggest other gstack
+skills during this session, including by asking whether to run one ("want me to run /X?").
+Only run skills the user explicitly invokes. This preference persists across sessions via
 `gstack-config`.
 
-If `PROACTIVE` is `true` (default): **invoke the Skill tool** when the user's request
-matches a skill's purpose. Do NOT answer directly when a skill exists for the task.
+If `PROACTIVE` is `core` (default): **invoke the Skill tool** only for the four core
+skills when the user's request matches their rule below: `/office-hours`, `/review`,
+`/qa` and `/ship`. For every other rule, answer directly and do not suggest the skill;
+the user types it. The browser step above and the **Failures** branches below follow the
+same rule: under `core`, name `/browse` or `/investigate` for the user to type instead of
+invoking it. A skill the user names is always invoked, whatever this setting says,
+and a step inside a skill that is already running (a handoff, a review gate, a subagent it
+dispatches) is part of that skill, not a suggestion.
+
+If `PROACTIVE` is `all` (or `true`): **invoke the Skill tool** when the user's request
+matches any skill's purpose. Do NOT answer directly when a skill exists for the task.
 Use the Skill tool to invoke it. The skill has specialized workflows, checklists, and
 quality gates that produce better results than answering inline.
 
-**Routing rules — when you see these patterns, INVOKE the skill via the Skill tool:**
+**Routing rules — when you see these patterns, INVOKE the skill via the Skill tool** (under
+`core`, only the four core rules auto-invoke):
 - User describes a new idea, asks "is this worth building", brainstorms, pitches a concept → invoke `/office-hours`
 - User asks to spec something out, file an issue, write up a ticket, "turn this into a GitHub issue", "backlog item" → invoke `/spec`
 - User asks about strategy, scope, ambition, "think bigger", "what should we build" → invoke `/plan-ceo-review`
@@ -190,21 +201,25 @@ quality gates that produce better results than answering inline.
 - User asks to review design of a plan → invoke `/plan-design-review`
 - User asks about developer experience of a plan, API/CLI/SDK design → invoke `/plan-devex-review`
 - User wants all reviews done automatically, "review everything" → invoke `/autoplan`
-- User reports a bug, error, broken behavior, "why is this broken", "this doesn't work", "wtf", "something's wrong" → invoke `/investigate`
+- User reports a bug, error, failing test or broken behavior, "why is this broken", "this doesn't work", "wtf", "something's wrong" → check the cause by **Failures** below, then fix it or invoke `/investigate`
 - User asks to test the site, find bugs, QA, "does this work", "check the deploy" → invoke `/qa`
 - User asks to just report bugs without fixing → invoke `/qa-only`
 - User asks to review code, check the diff, pre-landing review, "look at my changes" → invoke `/review`
 - User asks to find code worth sharing, shared-code extractions, or duplication worth consolidating → invoke `/deslop-shared-libs`
 - User asks to audit, prune or find low-value tests in the existing suite → invoke `/test-audit`
+- User asks to write a skill, improve or slim a skill, or add a lesson to a named skill → invoke `/write-skill`
 - User asks about visual polish, design audit of a live site, "this looks off" → invoke `/design-review`
 - User asks to audit the live developer experience, time-to-hello-world → invoke `/devex-review`
+- User asks to run the checks, make the tests pass, "verify my change", "check my work" while building → invoke `/verify`
 - User asks to ship, deploy, push, create a PR, "let's land this", "send it" → invoke `/ship`
 - User asks to merge + deploy + verify as one flow → invoke `/land-and-deploy`
+- User asks to rebase or revive an old PR, "modernize this PR", whether a stale PR is still worth landing → invoke `/modernize`
 - User asks to configure deployment for the project → invoke `/setup-deploy`
 - User asks to monitor prod after shipping, post-deploy checks → invoke `/canary`
 - User asks to update docs after shipping → invoke `/document-release`
 - User asks to write docs from scratch, generate documentation, "document this feature/module" → invoke `/document-generate`
 - User asks for a weekly retro, what did we ship, "how'd we do" → invoke `/retro`
+- User asks to run a crew of agents, coordinate lanes, build a merge train, call a slot, validate a READY block, write the crew digest, "set up a captain", "run the crew" → invoke `/captain`
 Generic “second opinion”, “outside review”, or “cross-model review” requests use `/codex` (namespaced: `/gstack-codex`). This selection follows the **copilot harness**, independently of model configuration. Explicit provider requests take precedence: Codex means `/codex`; Claude Code means `/claude-code`. Never silently substitute another provider. If that provider is the current harness, report that no outside invocation ran and suggest the other wrapper only as a separate user choice. Wrapper availability: Claude Code installs only /codex; Codex installs only /claude-code; other harnesses install both. Repair stale installations with `setup --host copilot`. There is no /claude compatibility alias.
 - User asks for safety mode, careful mode → invoke `/careful` or `/guard`
 - User asks to restrict edits to a directory → invoke `/freeze` or `/unfreeze`
@@ -220,9 +235,15 @@ Generic “second opinion”, “outside review”, or “cross-model review” 
 - User asks to codify or save the last `/scrape` as a reusable skill → invoke `/skillify` (fallback browser)
 - User asks about page speed, web performance regression → invoke `/benchmark`; model or skill benchmarks → invoke `/benchmark-models`
 - User asks to plan, preregister, price or pilot a paid eval → invoke `/eval-plan`
+- User asks to run a suite, build or eval on Ubicloud → invoke `/ubicloud`
 - User asks what gstack has learned, "show learnings" → invoke `/learn`
 - User asks to tune question sensitivity, "stop asking me that" → invoke `/plan-tune`
 - User asks for code quality dashboard, "health check" → invoke `/health`
+
+**Failures: check the cause, then route.** A failing test, error or stack trace shows where a failure surfaces, not its root cause.
+
+- **Cause supplied** (the user names a specific cause and a narrow fix): make one read-only check of the evidence it rests on, such as the named file, test or log. If that confirms the cause, make the fix and run the focused test that covers it. If it does not, invoke `/investigate` before any further tracing or edit.
+- **Cause unknown:** make one read-only triage pass over the supplied evidence and the directly implicated test and code. Do not reproduce, test hypotheses or search wider. If that pass establishes the root cause and a narrow fix, make the fix and run the focused test that covers it. If the cause, scope or intended behavior is still unclear, invoke `/investigate` before any broader diagnosis or edit.
 
 **Route only to skills in your available-skills list.** A rule above whose skill is
 not listed there is turned off on this install; skip it, never try to invoke it.
@@ -232,8 +253,9 @@ the skill's workflow, checklists and gates beat an ad-hoc answer. Answer directl
 no skill matches, for a quick factual question or a small edit the user scoped
 themselves, and when the user asks for a direct answer instead of a workflow.
 
-If the user opts out of suggestions, run `gstack-config set proactive false`.
-If they opt back in, run `gstack-config set proactive true`.
+If the user opts out of suggestions, run `gstack-config set proactive off`. If they want
+every skill suggested, run `gstack-config set proactive all`. `gstack-config set proactive
+core` restores the default (the four core skills only).
 
 
 ## Installed in this repository (gstack-copilot)

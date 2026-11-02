@@ -249,7 +249,8 @@ export function computePaidCaseSelection(options: {
     : selectTests(selectionFiles, table, GLOBAL_TOUCHFILES, { baseRef, cwd: rootDir }).selected;
   const selection = { e2e: select(E2E_TOUCHFILES), judges: select(LLM_JUDGE_TOUCHFILES) };
   if (options.profile === 'full') return { selection, reason: all ? 'run-all' : 'diff' };
-  const coverage = selectPrProfile({ selectedE2E: selection.e2e, selectedJudges: selection.judges, changedFiles: effectiveFiles, sourceAliases });
+  const coverage = selectPrProfile({ selectedE2E: selection.e2e, selectedJudges: selection.judges, changedFiles: effectiveFiles, sourceAliases,
+    screenPolicy: env.EVALS_SCREEN_POLICY === 'narrow' ? 'narrow' : 'broad' });
   if (coverage.needsFullValidation) {
     throw new Error(`PR profile requires full validation: ${coverage.missingCoverage.join(', ')}. Use --profile full and the relevant periodic cases.`);
   }
@@ -260,7 +261,7 @@ export function existingPromptSourceAliases(files: readonly string[], rootDir = 
   const aliases: Record<string, string> = {};
   for (const file of files) {
     if (!file.endsWith('.md')) continue;
-    const template = `${file}.tmpl`;
+    const template = /^[^/]+\/sections\/preamble\.md$/.test(file) ? file.replace(/sections\/preamble\.md$/, 'SKILL.md.tmpl') : `${file}.tmpl`;
     try { if (fs.statSync(path.join(rootDir, template)).isFile()) aliases[file] = template; }
     catch { /* Unknown/generated-only content must keep its own dependency identity. */ }
   }

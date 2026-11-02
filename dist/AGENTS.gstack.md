@@ -1,5 +1,5 @@
 <!-- gstack-copilot:start (managed by gstack-copilot's install.sh, do not edit between these markers) -->
-## GStack (gstack-copilot, GStack 1.91.176.0 @ 514fbfdc9)
+## GStack (gstack-copilot, GStack 1.93.4.0 @ a2d7a6f0f)
 
 GStack skills live in `.github/skills/gstack-*/`, their runtime in
 `.github/skills/gstack/`, and user state in `~/.gstack/`. Invoke them with the

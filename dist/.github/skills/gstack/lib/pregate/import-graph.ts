@@ -12,7 +12,10 @@
  *   3. the `bin/<name>` → `test/<name>*.test.*` convention (with and without
  *      the `gstack-` prefix);
  *   4. explicit `.gstack/pregate.json` `dependencies` declarations;
- *   5. in a Django project, the files Django loads by name (lib/pregate/django.ts).
+ *   5. in a Django project, the files Django loads by name (lib/pregate/django.ts);
+ *   6. in a Cargo crate, every `.rs` file and the Cargo.toml select the crate's
+ *      tests and its dependents' (lib/pregate/rust.ts); in-source
+ *      `#[cfg(test)]` files and `<crate>/tests/` files are the tests.
  * Dart directives (`import`/`export`/`part`, conditional URIs included) resolve
  * `package:<name>/x` through every tracked pubspec.yaml to `<root>/lib/x`.
  * Uncertainty selects more tests, never fewer: a dependency on a directory
@@ -25,6 +28,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { matchesAny } from '../ship-policy';
 import { djangoEdges } from './django';
+import { rustEdges } from './rust';
 
 export const SOURCE_EXT = /\.(?:[cm]?[jt]sx?|py|rb|sh|bash|go|rs|dart)$/;
 export const TEST_FILE_RE = /(?:^|\/)(?:test|tests|spec|__tests__)\/.*\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)[^/]*\.(?:test|spec)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:py|go|rb)$|_spec\.rb$|(?:^|\/)[^/]*\.bats$|(?:^|\/)test\/(?:.*\/)?[^/]*_test\.dart$/;
@@ -39,15 +43,24 @@ export interface Graph {
   unresolved?: Map<string, string[]>;
   /** tsconfig/jsconfig `extends` hops that were not followed (for the no-lane explanation). */
   aliasNotes?: string[];
+  /** Removed test → the files still in the tree its merge-base text exercised (never tests, helpers or fixtures); only for `goneSources`. */
+  goneSubjects?: Map<string, string[]>;
 }
 
 const scanner = new Bun.Transpiler({ loader: 'tsx' });
 // `( ) [ ] +` appear in framework route paths: Next.js route groups `(app)`,
 // dynamic segments `[id]` / `[[...slug]]`, SvelteKit `+page.svelte`. A literal
 // that matches more text only gains an edge when it resolves to a repo file.
-const QUOTED = /['"`]([A-Za-z0-9_@][A-Za-z0-9_./@()[\]+-]*)['"`]/g;
+// A relative literal (`'../ship/sections/pr-body.md.tmpl'` read through
+// `new URL(…, import.meta.url)` or `readFileSync`) resolves from the file that
+// names it, like a relative import; without it a test reading a template by
+// relative path had no edge to the template (GSTA-121's test/ship-publication-gates.test.ts).
+const QUOTED = /['"`]((?:\.\.?\/)*[A-Za-z0-9_@][A-Za-z0-9_./@()[\]+-]*)['"`]/g;
+// A dot-led literal (`'.gitleaks.toml'`, `'../.github/x.yml'`) runs as its own pass and leaves its
+// closing quote unconsumed, so a closing quote followed by `.method(` never eats the next literal's quote.
+const DOTFILE = /['"`]((?:\.\.?\/)*\.[A-Za-z0-9_@][A-Za-z0-9_./@()[\]+-]*)(?=['"`])/g;
 const JOIN = /\bjoin\(([^()]*)\)/g;
-const RESOLVE_EXT = ['', '.ts', '.tsx', '.js', '.mjs', '.cjs', '/index.ts', '/index.js'];
+const RESOLVE_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
 // A statement starts a line or follows `;` or a compound statement's `:`. The module spec is
 // non-empty and starts with a dot or a word character, so no two repetitions can share a dot or a space.
 const PY_IMPORT = /(?:^|[;:])[ \t\f]*(?:from[ \t]+(\.+(?:\w[\w.]*)?|\w[\w.]*)[ \t]+import[ \t]+(\([^)]*\)|[^\n;]+)|import[ \t]+([^\n;]+))/gm;
@@ -281,11 +294,11 @@ function resolveCandidate(files: Set<string>, dirs: Set<string>, c: string, lite
  */
 function resolveRefs(files: Set<string>, dirs: Set<string>, fromFile: string, ref: string, literal = false, config: PathAliases = NO_ALIASES): string[] {
   if (!ref || ref.startsWith('node:') || ref.startsWith('bun:')) return [];
-  if (ref.startsWith('.')) { const t = resolveCandidate(files, dirs, normalize(path.posix.join(path.posix.dirname(fromFile), ref)), literal); return t ? [t] : []; }
+  if (/^\.\.?(?:\/|$)/.test(ref)) { const t = resolveCandidate(files, dirs, normalize(path.posix.join(path.posix.dirname(fromFile), ref)), literal); return t ? [t] : []; }
   const { chosen, others } = matchAliases(config.aliases, ref);
   for (const c of chosen ?? []) { const t = resolveCandidate(files, dirs, c, literal); if (t) return [t]; }
   if (!chosen && others.length === 0 && ref.startsWith('@') && !ref.includes('/')) return [];
-  const plausible = [...others, ...(config.baseUrl ? [normalize(path.posix.join(config.baseUrl, ref))] : []), normalize(ref)];
+  const plausible = [...others, ...(config.baseUrl ? [normalize(path.posix.join(config.baseUrl, ref))] : []), normalize(ref), ...(literal && ref.startsWith('.') ? [normalize(path.posix.join(path.posix.dirname(fromFile), ref))] : [])];
   return [...new Set(plausible.map(c => resolveCandidate(files, dirs, c, literal)).filter((t): t is string => t !== null))];
 }
 
@@ -419,6 +432,7 @@ export function referencesIn(files: Set<string>, dirs: Set<string>, rel: string,
   // sources (a test spawns a bin; a bash bin calls a sibling). Prose and
   // manifests name everything and would make every file a hub.
   if (!scansLiterals(rel)) return out;
+  for (const m of source.matchAll(DOTFILE)) for (const target of resolveRefs(files, dirs, rel, m[1]!, true, config)) out.push({ target, via: 'literal' });
   for (const m of source.matchAll(QUOTED)) {
     const targets = resolveRefs(files, dirs, rel, m[1]!, true, config);
     for (const target of targets) out.push({ target, via: 'literal' });
@@ -434,23 +448,41 @@ export function referencesIn(files: Set<string>, dirs: Set<string>, rel: string,
   return out;
 }
 
+const TEST_TREE = /(?:^|\/)(?:test|tests|spec|__tests__)\//;
+
 /** Test-tree files (tests, helpers, fixtures), bin/ entrypoints and shell sources carry literal dependencies. */
 export function scansLiterals(rel: string): boolean {
-  return /(?:^|\/)(?:test|tests|spec|__tests__)\//.test(rel) || isTestFile(rel) || rel.startsWith('bin/') || /\.(?:sh|bash)$/.test(rel);
+  return TEST_TREE.test(rel) || isTestFile(rel) || rel.startsWith('bin/') || /\.(?:sh|bash)$/.test(rel);
+}
+
+/** The bin/ entrypoints a `test/<name>.test.*` file names by convention: test/gstack-ship-receipt-census.test.ts names bin/gstack-ship-receipt-census, then bin/gstack-ship-receipt, then bin/gstack-ship, … */
+function conventionBins(test: string, files: Set<string>): string[] {
+  const m = /^(?:[\w.-]+\/)*?test\/([\w-]+)\.(?:test|spec)\./.exec(test);
+  if (!m) return [];
+  const parts = m[1]!.split('-');
+  const out: string[] = [];
+  for (let n = parts.length; n >= 1; n--) {
+    const name = parts.slice(0, n).join('-');
+    for (const bin of [`bin/${name}`, `bin/gstack-${name}`, `bin/${name}.ts`, `bin/gstack-${name}.ts`]) if (files.has(bin)) out.push(bin);
+  }
+  return out;
 }
 
 export interface BuildOptions {
   declarations?: Record<string, string[]>; maxBytes?: number;
-  /** Paths that no longer exist (deleted or renamed-from) but that tests may still name; they resolve as dependencies so their consumers are found. */
+  /** Paths that no longer exist (deleted or renamed-from) but that tests may still name; they resolve as dependencies so their consumers are found, and are never tests themselves (`git ls-files` still lists an unstaged deletion). */
   extraFiles?: string[];
+  /** Merge-base text of removed test files; their forward edges to files still in the tree become `goneSubjects`. */
+  goneSources?: Map<string, string>;
 }
 
 /** The whole-repo reverse graph. Files over maxBytes (default 2 MiB) are skipped: generated bundles, not tests. */
 export function buildGraph(repoRoot: string, opts: BuildOptions = {}): Graph {
-  const all = listRepoFiles(repoRoot);
-  const files = new Set([...all, ...(opts.extraFiles ?? [])]);
+  const gone = new Set(opts.extraFiles ?? []);
+  const all = listRepoFiles(repoRoot).filter(f => !gone.has(f));
+  const files = new Set([...all, ...gone]);
   const dirs = new Set<string>();
-  for (const f of all) { let d = path.posix.dirname(f); while (d && d !== '.') { dirs.add(d); d = path.posix.dirname(d); } }
+  for (const f of files) { let d = path.posix.dirname(f); while (d && d !== '.') { dirs.add(d); d = path.posix.dirname(d); } }
   const config = readPathAliases(repoRoot);
   const graph: Graph = { files, tests: new Set(all.filter(isTestFile)), reverse: new Map(), unresolved: new Map(), aliasNotes: config.notes };
   const maxBytes = opts.maxBytes ?? 2 * 1024 * 1024;
@@ -465,16 +497,18 @@ export function buildGraph(repoRoot: string, opts: BuildOptions = {}): Graph {
     for (const { target, via } of referencesIn(files, dirs, rel, source, config, graph.tests.has(rel) ? unresolved : undefined, packages)) addEdge(graph, target, rel, via);
     if (unresolved.length) graph.unresolved!.set(rel, unresolved);
   }
+  const rust = rustEdges(all, rel => readRepoFile(repoRoot, rel, maxBytes));
+  for (const t of rust.tests) graph.tests.add(t);
+  for (const e of rust.edges) addEdge(graph, e.dependency, e.dependent, e.via);
   const django = djangoEdges({ files: [...files], tests: graph.tests, read: rel => pySources.get(rel) ?? readRepoFile(repoRoot, rel, maxBytes), code: pythonCode, resolveDotted: dotted => pythonPatchTarget(files, dotted) });
   for (const e of django) addEdge(graph, e.dependency, e.dependent, 'framework');
-  for (const test of graph.tests) {
-    const m = /^(?:[\w.-]+\/)*?test\/([\w-]+)\.(?:test|spec)\./.exec(test);
-    if (!m) continue;
-    // test/gstack-ship-receipt-census.test.ts names bin/gstack-ship-receipt-census, then bin/gstack-ship-receipt, then bin/gstack-ship, …
-    const parts = m[1]!.split('-');
-    for (let n = parts.length; n >= 1; n--) {
-      const name = parts.slice(0, n).join('-');
-      for (const bin of [`bin/${name}`, `bin/gstack-${name}`, `bin/${name}.ts`, `bin/gstack-${name}.ts`]) if (files.has(bin)) addEdge(graph, bin, test, 'convention');
+  for (const test of graph.tests) for (const bin of conventionBins(test, files)) addEdge(graph, bin, test, 'convention');
+  if (opts.goneSources) {
+    const present = new Set(all);
+    graph.goneSubjects = new Map();
+    for (const [rel, source] of opts.goneSources) {
+      const targets = [...referencesIn(files, dirs, rel, source, config, undefined, packages).map(r => r.target), ...conventionBins(rel, files)];
+      graph.goneSubjects.set(rel, [...new Set(targets)].filter(t => present.has(t) && !isTestFile(t) && !TEST_TREE.test(t)).sort());
     }
   }
   for (const [glob, tests] of Object.entries(opts.declarations ?? {})) {

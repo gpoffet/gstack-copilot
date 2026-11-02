@@ -13,9 +13,13 @@
  *                 depends on it; source code and test trees never do)
  *   selection     `<workflow.yml>/<job>` → the runner-owned command that lists
  *                 the lane's test files when the matrix is planner-computed
- *   warn          check ids downgraded to warn (never `secrets`; `lanes` keeps
- *                 its required-lane and requires-remote verdicts)
+ *   warn          check ids downgraded to warn (never `secrets`; `lanes`
+ *                 downgrades only a touched file with no lane, after the
+ *                 selected tests ran: a red lane stays `fail`)
  *   strays.allow  root files or new top-level directories that are intentional
+ *   local         `<workflow.yml>/<job>` lanes a local run satisfies (a
+ *                 platform-agnostic toolchain, or a repo whose CI is off):
+ *                 their tests run here instead of becoming requires-remote
  *   guards        `{ id, when: [globs], command, fix?, timeout_s? }`: a repo
  *                 command that must pass when a touched file matches `when`
  *                 (manifest checks, CLI goldens); never downgradable
@@ -27,20 +31,53 @@
  *                 a paid gate from (GSTACK_EVAL_CALLS v1; never executed)
  *   stall_timeout_s seconds without test output before the lanes check kills
  *                 the runner's process group (default 300; 0 disables)
+ *   timeout_s     seconds each runner process may take (the unit-file group,
+ *                 each serial file, each guard without its own timeout_s, the
+ *                 remote gate) when `--timeout` is not passed (default 600)
  *   remote_gate   the repo's remote test gate command: under 8 cores the test
  *                 tier is a requires-remote obligation naming it, and
  *                 `--remote` runs it (it prints `PREGATE_REMOTE: tree=… tests=… failed=…`)
+ *   run_profiles  name → `{ workflow, events, jobs, artifact, max_age_hours?, os? }`:
+ *                 the GitHub Actions runs `clear --run` accepts as evidence
+ *                 (lib/run-evidence.ts); a profile named after a lane clears it
+ *   remote_gate_runs `{ profiles, inventory }`: the run profiles that together
+ *                 clear the remote gate obligation on the identical tree, and
+ *                 the command listing the gate's test files they must cover
+ *   allowlist     `{ finding, paths?, pattern?, reason }` entries the `secrets`
+ *                 check accepts as benign: a gstack-redact finding id or a
+ *                 non-secret category, scoped by path globs and/or a regex
+ *                 anchored at the finding (lib/pregate/allowlist.ts); never
+ *                 `env.value` (a configured credential's real value) and never
+ *                 the whole `secret` category
+ *
+ * A policy declares lanes when it has a `dependencies`, `empty_lanes`,
+ * `selection` or `local` key (LANE_KEYS), even an empty one; only then is a touched file with no lane
+ * the hard PREGATE_NO_LANE. A policy without either (a timeout-only file)
+ * keeps the no-policy lane verdicts (lib/pregate/checks/lanes.ts).
+ *
+ * A repo that keeps `.gstack/` out of git can hold the same file at
+ * `<state root>/projects/<slug>/pregate.json` (lib/state-root.ts), honoured
+ * only when the base carries none. It must sit outside the repo, so a PR
+ * cannot reach it; a path inside the checkout is ignored (pregate/context).
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { ResultCodeName } from '../result-codes';
+import { runProfileErrors, type RemoteGateRuns, type RunProfile } from '../run-evidence';
 import { sealedErrors } from '../sealed-guard';
 import { containedRelative, globToRegExp } from '../ship-policy';
 
 export const PREGATE_CONFIG_PATH = '.gstack/pregate.json';
 export const PREGATE_CONFIG_SCHEMA = 'https://github.com/garrytan/gstack/docs/pregate.md#pregate-v1';
 export const NON_DOWNGRADABLE = ['secrets', 'guards'] as const;
+/** Finding ids (or categories) no allowlist entry may name: the real value of a credential-named environment variable (#3449), and the secret wildcard. */
+export const NON_ALLOWLISTABLE = ['env.value', 'secret'] as const;
+/** Whether no entry may name this finding id: the list above, plus the scanner's own `engine.*` refusals (an oversize input fails closed and is never benign). */
+export const nonAllowlistable = (id: string) => (NON_ALLOWLISTABLE as readonly string[]).includes(id) || id.startsWith('engine.');
+/** Categories an allowlist entry may name whole; a secret is always named by its id. */
+export const ALLOWLISTABLE_CATEGORIES = ['pii', 'internal', 'hygiene', 'legal'] as const;
 export const DEFAULT_SERIAL_PATTERNS = ['**/*.serial.test.*'];
 
 export interface PregateConfig {
@@ -52,21 +89,32 @@ export interface PregateConfig {
   selection: Record<string, string>;
   warn: string[];
   strays: { allow: string[] };
+  local: string[];
   guards: Guard[];
   serial_patterns: string[];
   price_file: string | null;
   stall_timeout_s: number | null;
+  timeout_s: number | null;
   remote_gate: string | null;
+  allowlist: AllowlistEntry[];
+  run_profiles: Record<string, RunProfile>;
+  remote_gate_runs: RemoteGateRuns | null;
 }
 export interface Guard { id: string; when: string[]; command: string; fix?: string; timeout_s?: number }
-export const DEFAULT_CONFIG: PregateConfig = { runner: null, dependencies: {}, empty_lanes: [], selection: {}, warn: [], strays: { allow: [] }, guards: [], serial_patterns: DEFAULT_SERIAL_PATTERNS, price_file: null, stall_timeout_s: null, remote_gate: null };
+export interface AllowlistEntry { finding: string; paths?: string[]; pattern?: string; reason: string }
+export const DEFAULT_CONFIG: PregateConfig = { runner: null, dependencies: {}, empty_lanes: [], selection: {}, warn: [], strays: { allow: [] }, local: [], guards: [], serial_patterns: DEFAULT_SERIAL_PATTERNS, price_file: null, stall_timeout_s: null, timeout_s: null, remote_gate: null, allowlist: [], run_profiles: {}, remote_gate_runs: null };
 export interface ConfigError { code: ResultCodeName; path: string; message: string }
 
 export const MAX_LIST = 256;
 const MAX_COMMAND = 512;
-const KEYS = ['runner', 'dependencies', 'empty_lanes', 'selection', 'warn', 'strays', 'guards', 'serial_patterns', 'price_file', 'sealed', 'stall_timeout_s', 'remote_gate'];
+const KEYS = ['runner', 'dependencies', 'empty_lanes', 'selection', 'warn', 'strays', 'local', 'guards', 'serial_patterns', 'price_file', 'sealed', 'stall_timeout_s', 'timeout_s', 'remote_gate', 'allowlist', 'run_profiles', 'remote_gate_runs'];
+const LANE_ID = /^[A-Za-z0-9_.-]+\.ya?ml\/[A-Za-z0-9_-]+$/;
 const MAX_GUARDS = 32;
 const GUARD_KEYS = ['id', 'when', 'command', 'fix', 'timeout_s'];
+const MAX_ALLOWLIST = 64;
+const MAX_PATTERN = 256;
+const ALLOWLIST_KEYS = ['finding', 'paths', 'pattern', 'reason'];
+const FINDING_ID = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/;
 
 function globError(g: string): string | null {
   const why = containedRelative(g);
@@ -102,6 +150,30 @@ function guardErrors(raw: unknown, errors: ConfigError[]): void {
   });
 }
 
+function allowlistErrors(raw: unknown, errors: ConfigError[]): void {
+  const bad = (p: string, message: string) => errors.push({ code: 'PREGATE_CONFIG_INVALID', path: p, message });
+  if (!Array.isArray(raw)) { bad('allowlist', 'must be an array of { finding, paths?, pattern?, reason }'); return; }
+  if (raw.length > MAX_ALLOWLIST) bad('allowlist', `more than ${MAX_ALLOWLIST} entries`);
+  raw.forEach((e, i) => {
+    const at = `allowlist[${i}]`;
+    if (!e || typeof e !== 'object' || Array.isArray(e)) { bad(at, 'must be an object { finding, paths?, pattern?, reason }'); return; }
+    const o = e as Record<string, unknown>;
+    for (const k of Object.keys(o)) if (!ALLOWLIST_KEYS.includes(k)) bad(`${at}.${k}`, `unknown key; valid keys: ${ALLOWLIST_KEYS.join(', ')}`);
+    if (typeof o.finding !== 'string' || !FINDING_ID.test(o.finding)) bad(`${at}.finding`, 'must be a gstack-redact finding id (env.kv, google.api_key, pii.phone.e164, …) or one of the categories pii, internal, hygiene, legal');
+    else if (nonAllowlistable(o.finding)) bad(`${at}.finding`, `${o.finding} cannot be allowlisted (${o.finding === 'env.value' ? 'the real value of a credential-named environment variable is never benign' : o.finding === 'secret' ? 'name the secret finding by its id, never the whole category' : 'an engine.* finding is the scanner refusing its input, not a finding in it'})`);
+    if (!('paths' in o) && !('pattern' in o)) bad(at, 'needs paths, pattern or both: an entry with no scope would allowlist every finding of that kind');
+    if ('paths' in o) {
+      if (!Array.isArray(o.paths) || o.paths.length === 0 || o.paths.some(p => typeof p !== 'string')) bad(`${at}.paths`, 'must be a non-empty array of globs');
+      else (o.paths as string[]).forEach((g, j) => { const why = globError(g); if (why) bad(`${at}.paths[${j}]`, `${JSON.stringify(g)} ${why}`); });
+    }
+    if ('pattern' in o) {
+      if (typeof o.pattern !== 'string' || !o.pattern.trim() || o.pattern.length > MAX_PATTERN) bad(`${at}.pattern`, `must be a regular expression under ${MAX_PATTERN} characters, matched at the finding's position in the added line`);
+      else { try { new RegExp(o.pattern); } catch (err: any) { bad(`${at}.pattern`, `not a valid regular expression: ${err.message}`); } }
+    }
+    if (typeof o.reason !== 'string' || !o.reason.trim()) bad(`${at}.reason`, 'must say why the finding is benign (the record repeats it)');
+  });
+}
+
 export function validateConfig(raw: unknown, knownChecks: readonly string[] = []): ConfigError[] {
   const errors: ConfigError[] = [];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [{ code: 'PREGATE_CONFIG_INVALID', path: '', message: 'config must be a JSON object' }];
@@ -119,11 +191,16 @@ export function validateConfig(raw: unknown, knownChecks: readonly string[] = []
   if ('stall_timeout_s' in obj && obj.stall_timeout_s !== null && (!Number.isInteger(obj.stall_timeout_s) || (obj.stall_timeout_s as number) < 0 || (obj.stall_timeout_s as number) > 86_400)) {
     errors.push({ code: 'PREGATE_CONFIG_INVALID', path: 'stall_timeout_s', message: 'must be an integer number of seconds from 0 (disabled) to 86400, or null' });
   }
+  if ('timeout_s' in obj && obj.timeout_s !== null && (!Number.isInteger(obj.timeout_s) || (obj.timeout_s as number) < 1 || (obj.timeout_s as number) > 3600)) {
+    errors.push({ code: 'PREGATE_CONFIG_INVALID', path: 'timeout_s', message: 'must be an integer number of seconds from 1 to 3600 (preflight and finish allow gstack-pregate one hour), or null' });
+  }
   if ('remote_gate' in obj && obj.remote_gate !== null) {
     const why = commandError(obj.remote_gate);
     if (why) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: 'remote_gate', message: why });
   }
+  for (const e of runProfileErrors(obj.run_profiles, obj.remote_gate_runs)) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: e.path, message: e.message });
   if ('guards' in obj) guardErrors(obj.guards, errors);
+  if ('allowlist' in obj) allowlistErrors(obj.allowlist, errors);
   if ('sealed' in obj) for (const e of sealedErrors(obj.sealed)) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: e.path, message: e.message });
   if ('serial_patterns' in obj) {
     const list = obj.serial_patterns;
@@ -153,7 +230,7 @@ export function validateConfig(raw: unknown, knownChecks: readonly string[] = []
     const sel = obj.selection;
     if (!sel || typeof sel !== 'object' || Array.isArray(sel)) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: 'selection', message: 'must be an object of <workflow.yml>/<job> → command' });
     else for (const [lane, command] of Object.entries(sel as Record<string, unknown>)) {
-      if (!/^[A-Za-z0-9_.-]+\.ya?ml\/[A-Za-z0-9_-]+$/.test(lane)) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: `selection[${JSON.stringify(lane)}]`, message: 'key must be <workflow file>/<job id>' });
+      if (!LANE_ID.test(lane)) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: `selection[${JSON.stringify(lane)}]`, message: 'key must be <workflow file>/<job id>' });
       const why = commandError(command);
       if (why) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: `selection[${JSON.stringify(lane)}]`, message: why });
     }
@@ -176,24 +253,32 @@ export function validateConfig(raw: unknown, knownChecks: readonly string[] = []
       }
     }
   }
+  if ('local' in obj) {
+    if (!Array.isArray(obj.local) || obj.local.some(l => typeof l !== 'string')) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: 'local', message: 'must be an array of <workflow file>/<job id>' });
+    else (obj.local as string[]).forEach((l, i) => { if (!LANE_ID.test(l)) errors.push({ code: 'PREGATE_CONFIG_INVALID', path: `local[${i}]`, message: `${JSON.stringify(l)} must be <workflow file>/<job id>` }); });
+  }
   return errors;
 }
 
-export function parseConfig(text: string, knownChecks: readonly string[] = []): { config: PregateConfig; errors: ConfigError[] } {
+/** The keys that declare lanes: with either present, a touched file with no lane is PREGATE_NO_LANE. */
+export const LANE_KEYS = ['dependencies', 'empty_lanes', 'selection', 'local'] as const;
+
+export function parseConfig(text: string, knownChecks: readonly string[] = []): { config: PregateConfig; errors: ConfigError[]; declaresLanes: boolean } {
   let raw: unknown;
   try { raw = JSON.parse(text); }
-  catch (e: any) { return { config: DEFAULT_CONFIG, errors: [{ code: 'PREGATE_CONFIG_INVALID', path: PREGATE_CONFIG_PATH, message: `not valid JSON: ${e.message}` }] }; }
+  catch (e: any) { return { config: DEFAULT_CONFIG, errors: [{ code: 'PREGATE_CONFIG_INVALID', path: PREGATE_CONFIG_PATH, message: `not valid JSON: ${e.message}` }], declaresLanes: false }; }
   const errors = validateConfig(raw, knownChecks);
-  if (errors.length) return { config: DEFAULT_CONFIG, errors };
+  if (errors.length) return { config: DEFAULT_CONFIG, errors, declaresLanes: false };
   const o = raw as Partial<PregateConfig>;
-  return { config: { $schema: o.$schema, runner: o.runner ?? null, dependencies: o.dependencies ?? {}, empty_lanes: o.empty_lanes ?? [], selection: o.selection ?? {}, warn: o.warn ?? [], strays: { allow: o.strays?.allow ?? [] }, guards: o.guards ?? [], serial_patterns: o.serial_patterns ?? DEFAULT_SERIAL_PATTERNS, price_file: o.price_file ?? null, stall_timeout_s: o.stall_timeout_s ?? null, remote_gate: o.remote_gate ?? null }, errors: [] };
+  return { declaresLanes: LANE_KEYS.some(k => k in o), config: { $schema: o.$schema, runner: o.runner ?? null, dependencies: o.dependencies ?? {}, empty_lanes: o.empty_lanes ?? [], selection: o.selection ?? {}, warn: o.warn ?? [], strays: { allow: o.strays?.allow ?? [] }, local: o.local ?? [], guards: o.guards ?? [], serial_patterns: o.serial_patterns ?? DEFAULT_SERIAL_PATTERNS, price_file: o.price_file ?? null, stall_timeout_s: o.stall_timeout_s ?? null, timeout_s: o.timeout_s ?? null, remote_gate: o.remote_gate ?? null, allowlist: o.allowlist ?? [], run_profiles: o.run_profiles ?? {}, remote_gate_runs: o.remote_gate_runs ?? null }, errors: [] };
 }
 
-export type ConfigLoad = { config: PregateConfig; errors: ConfigError[]; present: boolean; label: string; kind: 'base' | 'head' | 'none' } | { unavailable: true; base: string; detail: string };
+export type ConfigLoad = { config: PregateConfig; errors: ConfigError[]; present: boolean; label: string; kind: 'base' | 'head' | 'user' | 'none'; /** sha256 of the user file's bytes (kind 'user' only). */ digest?: string; /** The policy has a LANE_KEYS key; absent under kind 'none'. */ declaresLanes?: boolean } | { unavailable: true; base: string; detail: string };
 
 function git(cwd: string, args: string[]): { ok: boolean; out: string } {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 30_000 });
-  return { ok: r.status === 0, out: (r.stdout ?? '').trim() };
+  // r.error covers ENOBUFS, where stdout is cut at the buffer limit even with status 0.
+  return { ok: r.status === 0 && !r.error, out: (r.stdout ?? '').trim() };
 }
 
 export function loadConfigFromBase(repoRoot: string, base: string, knownChecks: readonly string[] = []): ConfigLoad {
@@ -201,7 +286,12 @@ export function loadConfigFromBase(repoRoot: string, base: string, knownChecks: 
   const sha = git(repoRoot, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
   if (!sha.ok || !sha.out) return { unavailable: true, base: base.replace(/^origin\//, ''), detail: `${ref} is not a resolvable commit` };
   const show = git(repoRoot, ['show', `${sha.out}:${PREGATE_CONFIG_PATH}`]);
-  if (!show.ok) return { config: DEFAULT_CONFIG, errors: [], present: false, label: `${ref}@${sha.out.slice(0, 12)} (no ${PREGATE_CONFIG_PATH})`, kind: 'none' };
+  if (!show.ok) {
+    // Absent only when the tree says so: a timeout, an oversized blob or a missing/corrupt object must refuse, not hand the run to the user file.
+    const entry = git(repoRoot, ['ls-tree', '--name-only', sha.out, '--', PREGATE_CONFIG_PATH]);
+    if (!entry.ok || entry.out) return { unavailable: true, base: base.replace(/^origin\//, ''), detail: `${ref}:${PREGATE_CONFIG_PATH} could not be read and git cannot confirm it is absent` };
+    return { config: DEFAULT_CONFIG, errors: [], present: false, label: `${ref}@${sha.out.slice(0, 12)} (no ${PREGATE_CONFIG_PATH})`, kind: 'none' };
+  }
   return { ...parseConfig(show.out, knownChecks), present: true, label: `${ref}@${sha.out.slice(0, 12)}:${PREGATE_CONFIG_PATH}`, kind: 'base' };
 }
 
@@ -209,6 +299,37 @@ export function loadConfigFromHead(repoRoot: string, knownChecks: readonly strin
   const file = path.join(repoRoot, PREGATE_CONFIG_PATH);
   if (!fs.existsSync(file)) return { config: DEFAULT_CONFIG, errors: [], present: false, label: `head (no ${PREGATE_CONFIG_PATH})`, kind: 'none' };
   return { ...parseConfig(fs.readFileSync(file, 'utf8'), knownChecks), present: true, label: `head (unreviewed) ${PREGATE_CONFIG_PATH}`, kind: 'head' };
+}
+
+/** A symlink to nothing on the way to `file` (a dotfiles link not yet cloned): a policy the user meant to have, not an absent one. */
+function danglingLink(file: string): boolean {
+  for (let p = file; path.dirname(p) !== p; p = path.dirname(p)) {
+    try { if (fs.lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink() && !fs.existsSync(p)) return true; } catch { return true; }
+  }
+  return false;
+}
+
+/** Nothing at `file` and no dangling link on the way to it: the only state that means "no user policy", for the loader and verify alike. */
+export function userPolicyAbsent(file: string): boolean {
+  try { fs.statSync(file); return false; } catch (e) { return (e as NodeJS.ErrnoException).code === 'ENOENT' && !danglingLink(file); }
+}
+
+/** The user-owned copy for a repo that keeps `.gstack/` out of git; the caller consults it only when the base has none. */
+export function loadConfigFromUser(file: string, knownChecks: readonly string[] = []): ConfigLoad | null {
+  let text: string;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT' && userPolicyAbsent(file)) return null;
+    // An unreadable policy must refuse, never fall back to defaults (its guards would silently vanish).
+    return { ...parseConfig('{}', knownChecks), errors: [{ code: 'PREGATE_CONFIG_INVALID', path: file, message: `cannot read the user-owned policy: ${(e as Error).message}` }], present: true, label: `user ${file}`, kind: 'user' };
+  }
+  const load = parseConfig(text, knownChecks);
+  // `sealed` (the pre-push guard), `price_file` (gstack-eval-plan) and the run profiles (`clear --run`) read only the git copies, so a non-null value in the user file would look active and do nothing.
+  let raw: unknown = null;
+  try { raw = JSON.parse(text); } catch { /* parseConfig reported it */ }
+  const ignored = raw && typeof raw === 'object' && !Array.isArray(raw) ? ['sealed', 'price_file', 'run_profiles', 'remote_gate_runs'].filter(k => { const v = (raw as Record<string, unknown>)[k]; return v != null && !(k === 'run_profiles' && typeof v === 'object' && Object.keys(v).length === 0); }) : [];
+  // parseConfig names the repo copy for a JSON error; this file is not it.
+  const errors = [...load.errors.map(e => e.path === PREGATE_CONFIG_PATH ? { ...e, path: file } : e), ...ignored.map(k => ({ code: 'PREGATE_CONFIG_INVALID' as const, path: k, message: `the user-owned policy covers gstack-pregate run only; ${k} is read from ${PREGATE_CONFIG_PATH} on the base branch` }))];
+  return { ...load, errors, present: true, label: `user ${file}`, kind: 'user', digest: createHash('sha256').update(text).digest('hex') };
 }
 
 export function isConfigUnavailable(load: ConfigLoad): load is { unavailable: true; base: string; detail: string } {
@@ -221,13 +342,20 @@ export function explainConfig(): string {
     'dependencies: glob → test files the import graph cannot see (subprocess targets, runtime reads, generated inputs); [] declares no lane needed',
     'empty_lanes: extra globs treated as docs/no-tests when nothing else maps them. Built-in, with or without this file: any Markdown file the import graph maps to no test (a quoted path, a join() of path segments, an import, or a dependencies entry), plus README/CHANGELOG/CONTRIBUTING/LICENSE/AGENTS/CLAUDE and licence text under any name; assets (images, fonts, media) and allowlisted tool config take their own empty lane. Source code and files under a test directory never qualify. A test that reads the file still selects that test',
     'selection: <workflow.yml>/<job> → the runner-owned command that lists that lane’s test files when its matrix is planner-computed',
-    `warn: check ids downgraded to warn; never ${NON_DOWNGRADABLE.join(', ')}; lanes keeps its required-lane and requires-remote verdicts`,
+    `warn: check ids downgraded to warn; never ${NON_DOWNGRADABLE.join(', ')}; lanes downgrades only a touched file with no lane, after the selected tests ran (a red lane stays fail)`,
+    `lane requirements: a policy with any of ${LANE_KEYS.join(', ')} (even empty) makes a touched file with no lane PREGATE_NO_LANE; a policy with none of them (timeout_s only, say) keeps the no-policy warning (PREGATE_NO_POLICY) and starter`,
     'strays.allow: root files or new top-level directories that are intentional',
+    'local: <workflow.yml>/<job> lanes a local run satisfies (platform-agnostic toolchain, or CI off); their tests run here, not requires-remote',
     'guards: [{ id, when: [globs], command, fix?, timeout_s? }]: each guard whose globs match a touched file runs in its own process (--allow-repo-commands); a failure fails pregate with the guard id and fix; never downgradable',
     `serial_patterns: test-file globs the lanes check runs one process per file, apart from the unit files (default ${DEFAULT_SERIAL_PATTERNS.join(', ')})`,
-    'sealed: { paths, transcripts, answer_markers, seed_patterns, local_paths, visibility }: sealed or eval output the pre-push hook and `gstack-pregate sealed` refuse to publish to a public destination (docs/pregate.md#sealed)',
+    'sealed: { paths, transcripts, answer_markers, seed_patterns, local_paths, allow_paths, case_insensitive, label_keys, identifier_keys, visibility }: sealed or eval output the pre-push hook and `gstack-pregate sealed` refuse to publish to a public destination; allow_paths (base branch only) exempt publishable files from the path globs; label_keys turns on sealed.label_join, which refuses a published record that puts one of those fields next to an identifier (identifier_keys globs, or a hex value) (docs/pregate.md#sealed)',
     'price_file: repo-relative path of the GSTACK_EVAL_CALLS v1 call-plan file `gstack-eval-plan price-gate` prices a paid gate from; never executed (docs/eval-calls.md)',
     'stall_timeout_s: seconds without test output before the lanes check kills the runner\'s process group and records it incomplete (default 300; 0 disables; --stall-timeout overrides)',
+    'timeout_s: seconds each runner process may take (the unit-file group, each serial file, each guard without its own timeout_s, and the remote gate\'s deadline) when --timeout is not passed; 1 to 3600, default 600',
     'remote_gate: the repo\'s remote test gate command; under 8 cores the test tier becomes a requires-remote obligation naming it, and gstack-pregate --remote runs it (it must print PREGATE_REMOTE: tree=<tree> tests=<n> failed=<n>) (docs/pregate.md#remote-gate)',
+    'run_profiles: name → { workflow, events, jobs, artifact, max_age_hours?, os? }; the GitHub Actions runs gstack-pregate clear --run verifies as evidence on the identical tree (docs/pregate.md#run-evidence)',
+    'remote_gate_runs: { profiles, inventory }; the run profiles that together clear the remote gate obligation, and the command listing the gate\'s test files they must cover (docs/pregate.md#run-evidence)',
+    `allowlist: [{ finding, paths?, pattern?, reason }]: benign findings the secrets check accepts and names as allowlisted. finding is a gstack-redact id (env.kv, google.api_key, pii.phone.e164, …) or a category (${ALLOWLISTABLE_CATEGORIES.join(', ')}); paths are globs; pattern is a regex matched at the finding's position in the added line; one of the two is required, reason always. Never ${NON_ALLOWLISTABLE.join(' or ')} or engine.* (docs/pregate.md#allowlist)`,
+    'no .gstack/pregate.json on the base: <state root>/projects/<slug>/pregate.json is read instead (state root: GSTACK_STATE_ROOT, else GSTACK_HOME, else GSTACK_STATE_DIR, else a gstack plugin data dir, else ~/.gstack, per docs/state-root.md; run --explain prints the resolved path; outside the repo, so a PR cannot reach it; a path inside the checkout is ignored)',
   ].join('\n') + '\n';
 }
