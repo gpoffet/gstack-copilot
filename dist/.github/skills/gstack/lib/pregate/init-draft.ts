@@ -27,7 +27,7 @@ const LANGUAGES: Array<[string, RegExp]> = [
   ['go', /\.go$/], ['ruby', /\.rb$/], ['rust', /\.rs$/], ['shell', /\.(?:sh|bash|bats)$/],
 ];
 /** Above this many tests a directory's tests are no longer a useful suggestion. */
-const MAX_SUGGESTED = 25;
+export const MAX_SUGGESTED = 25;
 const MAX_TODO_LINES = 50;
 
 export interface InitDraft {
@@ -40,7 +40,7 @@ export interface InitDraft {
 }
 
 /** The tests under the nearest ancestor directory of `file` (not the repo root) that has 1..MAX_SUGGESTED tests. */
-function nearestTests(tests: readonly string[], file: string): string[] {
+export function nearestTests(tests: readonly string[], file: string): string[] {
   for (let dir = path.posix.dirname(file); dir !== '.' && dir !== ''; dir = path.posix.dirname(dir)) {
     const under = tests.filter(t => t.startsWith(`${dir}/`));
     if (under.length > MAX_SUGGESTED) return [];
@@ -72,13 +72,14 @@ export function draftConfig(repoRoot: string): InitDraft {
   }
 
   const groups = new Map<string, string[]>();
-  for (const t of tests) { const lang = t.endsWith('.dart') ? 'dart' : t.endsWith('.py') ? 'python' : /\.[cm]?[jt]sx?$/.test(t) ? 'javascript' : 'other'; groups.set(lang, [...(groups.get(lang) ?? []), t]); }
+  for (const t of tests) { const lang = t.endsWith('.dart') ? 'dart' : t.endsWith('.rs') ? 'rust' : t.endsWith('.py') ? 'python' : /\.[cm]?[jt]sx?$/.test(t) ? 'javascript' : 'other'; groups.set(lang, [...(groups.get(lang) ?? []), t]); }
   const notes = [...groups].map(([lang, list]) => {
     if (lang === 'dart') return `${list.length} Dart test file(s) run per package with flutter test or dart test`;
+    if (lang === 'rust') return `${list.length} Rust test file(s) run per crate with cargo test -p`;
     const runner = detectRunner({ repoRoot, config: DEFAULT_CONFIG }, list);
     return runner ? `${lang} tests detected at run time: ${runner}` : `no runner detected for ${list.length} ${lang} test file(s); set runner (with {files})`;
   });
-  const mixed = [...groups.keys()].filter(l => l !== 'dart').length > 1 ? '; a selection mixing these languages needs runner set' : '';
+  const mixed = [...groups.keys()].filter(l => l !== 'dart' && l !== 'rust').length > 1 ? '; a selection mixing these languages needs runner set' : '';
   const runnerNote = notes.length ? notes.join('; ') + mixed : 'no test files found';
 
   const selectionTodo = discoverLanes(repoRoot).filter(l => l.runsTests && l.matrixExpression && l.testFiles.length === 0).map(l => l.id);
